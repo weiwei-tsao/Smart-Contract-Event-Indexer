@@ -1,0 +1,452 @@
+---
+description: GraphQL API design standards using gqlgen
+globs:
+  - "graphql/**/*.graphql"
+  - "services/api-gateway/**/*.go"
+alwaysApply: false
+---
+
+# GraphQL API Design Standards
+
+You are designing a GraphQL API for blockchain event queries using gqlgen. Follow these standards for schema design and resolver implementation.
+
+## Schema Design Principles
+
+### Core Types
+```graphql
+# Main event type with complete transaction context
+type Event {
+  id: ID!
+  contractAddress: String!
+  eventName: String!
+  blockNumber: Int!
+  blockTimestamp: DateTime!
+  transactionHash: String!
+  logIndex: Int!
+  args: [EventArg!]!
+}
+
+# Event arguments (supports any type)
+type EventArg {
+  name: String!
+  value: String!
+  type: String!
+}
+
+# Contract configuration
+type Contract {
+  id: ID!
+  address: String!
+  name: String
+  abi: String!
+  startBlock: Int!
+  currentBlock: Int!
+  createdAt: DateTime!
+}
+
+# Statistics aggregation
+type ContractStats {
+  contractAddress: String!
+  totalEvents: Int!
+  latestBlock: Int!
+  indexingDelay: Int!
+  uniqueAddresses: Int
+}
+```
+
+### Query Design
+
+```graphql
+type Query {
+  # Primary event query with filtering
+  events(
+    contractAddress: String!
+    eventName: String
+    fromBlock: Int
+    toBlock: Int
+    first: Int = 20
+    after: String
+  ): EventConnection!
+  
+  # Query by transaction hash
+  eventsByTransaction(txHash: String!): [Event!]!
+  
+  # Query by address (sender/receiver)
+  eventsByAddress(
+    address: String!
+    contractAddress: String
+    first: Int = 50
+    after: String
+  ): EventConnection!
+  
+  # Get contract info
+  contract(address: String!): Contract
+  
+  # Get contract statistics
+  contractStats(address: String!): ContractStats!
+  
+  # List all monitored contracts
+  contracts(first: Int = 10, after: String): ContractConnection!
+}
+
+# Relay-style cursor pagination
+type EventConnection {
+  edges: [EventEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type EventEdge {
+  node: Event!
+  cursor: String!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+  endCursor: String
+}
+```
+
+### Mutation Design (Admin Functions)
+
+```graphql
+type Mutation {
+  # Add new contract to monitor (idempotent)
+  addContract(input: AddContractInput!): AddContractPayload!
+  
+  # Remove contract from monitoring
+  removeContract(address: String!): RemoveContractPayload!
+  
+  # Trigger historical data backfill
+  triggerBackfill(input: BackfillInput!): BackfillPayload!
+}
+
+input AddContractInput {
+  address: String!
+  abi: String!
+  name: String
+  startBlock: Int!
+}
+
+type AddContractPayload {
+  success: Boolean!
+  contract: Contract
+  isNew: Boolean!  # Indicates if contract was newly added
+  message: String
+}
+
+input BackfillInput {
+  contractAddress: String!
+  fromBlock: Int!
+  toBlock: Int!
+}
+
+type BackfillPayload {
+  success: Boolean!
+  jobId: String!
+  estimatedTime: Int
+  message: String
+}
+```
+
+### Custom Scalars
+
+```graphql
+# Custom scalar types
+scalar DateTime  # ISO 8601 timestamp
+scalar BigInt    # For uint256 values (as string)
+scalar Address   # Ethereum address with checksum validation
+scalar Bytes32   # 32-byte hash values
+```
+
+## Resolver Implementation
+
+### Data Loaders (Prevent N+1 Queries)
+
+```go
+// Use dataloaden to generate type-safe data loaders
+type EventLoader struct {
+    // Batch function
+    fetch func(ctx context.Context, keys []string) ([]*model.Event, []error)
+}
+
+// In resolver setup
+func (r *Resolver) EventLoader() *EventLoader {
+    return &EventLoader{
+        fetch: func(ctx context.Context, txHashes []string) ([]*model.Event, []error) {
+            // Single batch query to database
+            events, err := r.db.GetEventsByTxHashes(ctx, txHashes)
+            // map results back to keys
+            return events, errors
+        },
+    }
+}
+```
+
+### Resolver Implementation Pattern
+
+```go
+// services/api-gateway/graph/schema.resolvers.go
+
+func (r *queryResolver) Events(
+    ctx context.Context, 
+    contractAddress string,
+    eventName *string,
+    fromBlock *int,
+    toBlock *int,
+    first *int,
+    after *string,
+) (*model.EventConnection, error) {
+    // 1. Validate input
+    if !common.IsHexAddress(contractAddress) {
+        return nil, fmt.Errorf("invalid contract address")
+    }
+    
+    // 2. Parse cursor for pagination
+    var offset int
+    if after != nil {
+        offset, err = decodeCursor(*after)
+        if err != nil {
+            return nil, err
+        }
+    }
+    
+    // 3. Call query service via gRPC
+    resp, err := r.queryClient.GetEvents(ctx, &pb.EventsRequest{
+        ContractAddress: contractAddress,
+        EventName:       eventName,
+        FromBlock:       fromBlock,
+        ToBlock:         toBlock,
+        Limit:           first,
+        Offset:          offset,
+    })
+    if err != nil {
+        return nil, err
+    }
+    
+    // 4. Transform to GraphQL types
+    return transformToConnection(resp), nil
+}
+```
+
+### Mutation Idempotency
+
+```go
+// AddContract mutation must be idempotent
+func (r *mutationResolver) AddContract(
+    ctx context.Context, 
+    input model.AddContractInput,
+) (*model.AddContractPayload, error) {
+    // 1. Check if contract already exists
+    existing, err := r.db.GetContract(ctx, input.Address)
+    if err == nil && existing != nil {
+        return &model.AddContractPayload{
+            Success: true,
+            Contract: existing,
+            IsNew: false,
+            Message: "Contract already exists",
+        }, nil
+    }
+    
+    // 2. Validate ABI
+    _, err = abi.JSON(strings.NewReader(input.ABI))
+    if err != nil {
+        return nil, fmt.Errorf("invalid ABI: %w", err)
+    }
+    
+    // 3. Create contract
+    contract, err := r.db.CreateContract(ctx, input)
+    if err != nil {
+        return nil, err
+    }
+    
+    return &model.AddContractPayload{
+        Success: true,
+        Contract: contract,
+        IsNew: true,
+        Message: "Contract added successfully",
+    }, nil
+}
+```
+
+## Type Conversion Standards
+
+### BigInt Handling
+```go
+// Always convert big.Int to string to prevent precision loss
+type Event struct {
+    Value string `json:"value"` // uint256 as string
+}
+
+// In resolver
+func (r *eventResolver) Value(ctx context.Context, obj *model.Event) (string, error) {
+    // bigInt is stored as numeric in DB
+    return obj.Value.String(), nil
+}
+```
+
+### DateTime Handling
+```go
+// Use ISO 8601 format
+func (e Event) BlockTimestamp() string {
+    return e.Timestamp.Format(time.RFC3339)
+}
+```
+
+### Address Checksumming
+```go
+// Always return checksummed addresses
+func (e Event) ContractAddress() string {
+    return common.HexToAddress(e.ContractAddr).Hex()
+}
+```
+
+## Error Handling
+
+### GraphQL Errors
+```go
+import "github.com/vektah/gqlparser/v2/gqlerror"
+
+// Return user-friendly errors
+func (r *queryResolver) Events(...) (*model.EventConnection, error) {
+    events, err := r.service.GetEvents(ctx, filter)
+    if err != nil {
+        // Don't expose internal errors
+        return nil, gqlerror.Errorf("Failed to fetch events")
+    }
+    return events, nil
+}
+```
+
+### Error Extensions
+```graphql
+# Return structured errors
+{
+  "errors": [{
+    "message": "Invalid block range",
+    "extensions": {
+      "code": "BAD_USER_INPUT",
+      "field": "toBlock"
+    }
+  }]
+}
+```
+
+## Performance Optimization
+
+### Query Complexity Analysis
+```go
+// Limit query complexity to prevent abuse
+func main() {
+    srv := handler.NewDefaultServer(generated.NewExecutableSchema(cfg))
+    
+    srv.Use(extension.FixedComplexityLimit(1000))
+}
+```
+
+### Field-Level Caching
+```go
+// Cache expensive computed fields
+type statsResolver struct {
+    cache *redis.Client
+}
+
+func (r *statsResolver) TotalVolume(ctx context.Context, obj *model.Contract) (string, error) {
+    cacheKey := fmt.Sprintf("stats:volume:%s", obj.Address)
+    
+    // Try cache first
+    if cached, err := r.cache.Get(ctx, cacheKey).Result(); err == nil {
+        return cached, nil
+    }
+    
+    // Compute and cache
+    volume, err := r.computeVolume(ctx, obj.Address)
+    if err != nil {
+        return "", err
+    }
+    
+    r.cache.Set(ctx, cacheKey, volume, 5*time.Minute)
+    return volume, nil
+}
+```
+
+### Pagination Best Practices
+```go
+// Use cursor-based pagination for consistency
+func encodeCursor(id int64, blockNumber int64) string {
+    data := fmt.Sprintf("%d:%d", id, blockNumber)
+    return base64.StdEncoding.EncodeToString([]byte(data))
+}
+
+func decodeCursor(cursor string) (id int64, blockNumber int64, err error) {
+    decoded, err := base64.StdEncoding.DecodeString(cursor)
+    // parse and return
+}
+```
+
+## Testing
+
+### Resolver Tests
+```go
+func TestEventsResolver(t *testing.T) {
+    // Setup test database
+    db := setupTestDB(t)
+    defer db.Close()
+    
+    // Create resolver with mock dependencies
+    resolver := &queryResolver{
+        db: db,
+        queryClient: mockQueryClient,
+    }
+    
+    // Test query
+    result, err := resolver.Events(
+        context.Background(),
+        "0x...",
+        nil, nil, nil,
+        ptr(20), nil,
+    )
+    
+    assert.NoError(t, err)
+    assert.Len(t, result.Edges, 20)
+}
+```
+
+## API Documentation
+
+### Use GraphQL descriptions
+```graphql
+"""
+Query events from a specific smart contract with optional filtering.
+Supports cursor-based pagination for efficient data retrieval.
+"""
+type Query {
+  """
+  Fetch events from a contract with optional filters.
+  
+  Example:
+    events(
+      contractAddress: "0x..."
+      eventName: "Transfer"
+      fromBlock: 12345
+      first: 20
+    )
+  """
+  events(...): EventConnection!
+}
+```
+
+## Critical Reminders
+
+1. **Always validate Ethereum addresses** before querying
+2. **Use cursor pagination** for all list queries
+3. **Implement data loaders** to prevent N+1 queries
+4. **Convert BigInt to string** to preserve precision
+5. **Make mutations idempotent** where possible
+6. **Cache expensive computed fields** with Redis
+7. **Limit query complexity** to prevent abuse
+8. **Return checksummed addresses** in responses
+9. **Use structured error codes** for client handling
+10. **Add comprehensive GraphQL descriptions** for documentation

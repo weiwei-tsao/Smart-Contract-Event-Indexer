@@ -1,0 +1,544 @@
+---
+description: Testing standards for Go microservices with blockchain integration
+globs:
+  - "**/*_test.go"
+  - "test/**/*"
+alwaysApply: false
+---
+
+# Testing Standards for Event Indexer
+
+You are writing comprehensive tests for a blockchain event indexer. Follow these standards for unit, integration, and end-to-end testing.
+
+## Test File Organization
+
+```
+service/
+├── handler.go
+├── handler_test.go          # Unit tests
+├── integration_test.go      # Integration tests
+└── testdata/
+    ├── contract_abi.json
+    └── sample_events.json
+```
+
+## Unit Testing Standards
+
+### Table-Driven Tests
+```go
+func TestParseTransferEvent(t *testing.T) {
+    tests := []struct {
+        name      string
+        input     types.Log
+        want      Event
+        wantErr   bool
+        errMsg    string
+    }{
+        {
+            name: "valid ERC20 transfer",
+            input: types.Log{
+                Address: common.HexToAddress("0x..."),
+                Topics: []common.Hash{
+                    crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)")),
+                    common.HexToHash("0x..."), // from
+                    common.HexToHash("0x..."), // to
+                },
+                Data: hexutil.MustDecode("0x0000000000000000000000000000000000000000000000000000000000000064"),
+            },
+            want: Event{
+                EventName: "Transfer",
+                Args: EventArgs{
+                    "from":  "0x...",
+                    "to":    "0x...",
+                    "value": "100",
+                },
+            },
+            wantErr: false,
+        },
+        {
+            name: "invalid event signature",
+            input: types.Log{
+                Topics: []common.Hash{common.HexToHash("0xwrong")},
+            },
+            wantErr: true,
+            errMsg:  "unknown event signature",
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            parser := NewEventParser(testABI)
+            got, err := parser.Parse(tt.input)
+            
+            if tt.wantErr {
+                require.Error(t, err)
+                if tt.errMsg != "" {
+                    assert.Contains(t, err.Error(), tt.errMsg)
+                }
+                return
+            }
+            
+            require.NoError(t, err)
+            assert.Equal(t, tt.want.EventName, got.EventName)
+            assert.Equal(t, tt.want.Args, got.Args)
+        })
+    }
+}
+```
+
+### Mocking Best Practices
+
+```go
+// Define interfaces for dependencies
+type BlockchainClient interface {
+    SubscribeNewHead(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error)
+    FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error)
+}
+
+// Use testify/mock for mock implementations
+type MockBlockchainClient struct {
+    mock.Mock
+}
+
+func (m *MockBlockchainClient) FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error) {
+    args := m.Called(ctx, q)
+    return args.Get(0).([]types.Log), args.Error(1)
+}
+
+// In tests
+func TestIndexer_FetchEvents(t *testing.T) {
+    mockClient := new(MockBlockchainClient)
+    mockClient.On("FilterLogs", 
+        mock.Anything, 
+        mock.MatchedBy(func(q ethereum.FilterQuery) bool {
+            return q.FromBlock.Uint64() == 100
+        }),
+    ).Return([]types.Log{
+        // test data
+    }, nil)
+    
+    indexer := NewIndexer(mockClient)
+    events, err := indexer.FetchEvents(context.Background(), 100, 200)
+    
+    require.NoError(t, err)
+    assert.Len(t, events, 1)
+    mockClient.AssertExpectations(t)
+}
+```
+
+### Testing with Context
+
+```go
+func TestWithTimeout(t *testing.T) {
+    ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+    defer cancel()
+    
+    mockClient := new(MockBlockchainClient)
+    mockClient.On("FilterLogs", mock.Anything, mock.Anything).
+        Run(func(args mock.Arguments) {
+            time.Sleep(200 * time.Millisecond) // Simulate slow response
+        }).
+        Return([]types.Log{}, nil)
+    
+    indexer := NewIndexer(mockClient)
+    _, err := indexer.FetchEvents(ctx, 100, 200)
+    
+    assert.Error(t, err)
+    assert.True(t, errors.Is(err, context.DeadlineExceeded))
+}
+```
+
+## Integration Testing
+
+### Using Testcontainers
+
+```go
+import (
+    "github.com/testcontainers/testcontainers-go"
+    "github.com/testcontainers/testcontainers-go/wait"
+)
+
+func setupTestDB(t *testing.T) (*sqlx.DB, func()) {
+    ctx := context.Background()
+    
+    req := testcontainers.ContainerRequest{
+        Image:        "postgres:15-alpine",
+        ExposedPorts: []string{"5432/tcp"},
+        Env: map[string]string{
+            "POSTGRES_USER":     "test",
+            "POSTGRES_PASSWORD": "test",
+            "POSTGRES_DB":       "testdb",
+        },
+        WaitingFor: wait.ForLog("database system is ready to accept connections").
+            WithOccurrence(2).
+            WithStartupTimeout(30 * time.Second),
+    }
+    
+    container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+        ContainerRequest: req,
+        Started:          true,
+    })
+    require.NoError(t, err)
+    
+    host, err := container.Host(ctx)
+    require.NoError(t, err)
+    port, err := container.MappedPort(ctx, "5432")
+    require.NoError(t, err)
+    
+    dsn := fmt.Sprintf("postgres://test:test@%s:%s/testdb?sslmode=disable", host, port.Port())
+    db, err := sqlx.Connect("postgres", dsn)
+    require.NoError(t, err)
+    
+    // Run migrations
+    runMigrations(t, dsn)
+    
+    cleanup := func() {
+        db.Close()
+        container.Terminate(ctx)
+    }
+    
+    return db, cleanup
+}
+
+func TestStorage_Integration(t *testing.T) {
+    db, cleanup := setupTestDB(t)
+    defer cleanup()
+    
+    storage := NewStorage(db)
+    
+    // Test actual database operations
+    contract := &Contract{
+        Address:    "0x1234567890123456789012345678901234567890",
+        ABI:        testABI,
+        StartBlock: 1000,
+    }
+    
+    err := storage.CreateContract(context.Background(), contract)
+    require.NoError(t, err)
+    
+    retrieved, err := storage.GetContract(context.Background(), contract.Address)
+    require.NoError(t, err)
+    assert.Equal(t, contract.Address, retrieved.Address)
+}
+```
+
+### Testing with Local Blockchain (Ganache)
+
+```go
+func setupTestChain(t *testing.T) (*ethclient.Client, func()) {
+    ctx := context.Background()
+    
+    req := testcontainers.ContainerRequest{
+        Image:        "trufflesuite/ganache:latest",
+        ExposedPorts: []string{"8545/tcp"},
+        Cmd: []string{
+            "--deterministic",
+            "--accounts", "10",
+            "--gasLimit", "10000000",
+        },
+        WaitingFor: wait.ForHTTP("/").WithPort("8545/tcp"),
+    }
+    
+    container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+        ContainerRequest: req,
+        Started:          true,
+    })
+    require.NoError(t, err)
+    
+    host, _ := container.Host(ctx)
+    port, _ := container.MappedPort(ctx, "8545")
+    
+    rpcURL := fmt.Sprintf("http://%s:%s", host, port.Port())
+    client, err := ethclient.Dial(rpcURL)
+    require.NoError(t, err)
+    
+    cleanup := func() {
+        client.Close()
+        container.Terminate(ctx)
+    }
+    
+    return client, cleanup
+}
+
+func TestIndexer_RealBlockchain(t *testing.T) {
+    if testing.Short() {
+        t.Skip("Skipping integration test")
+    }
+    
+    client, cleanup := setupTestChain(t)
+    defer cleanup()
+    
+    // Deploy test contract
+    contractAddr := deployTestContract(t, client)
+    
+    // Trigger events
+    triggerTransferEvent(t, client, contractAddr)
+    
+    // Test indexer
+    indexer := NewIndexer(client)
+    events, err := indexer.FetchEvents(context.Background(), 1, 100)
+    
+    require.NoError(t, err)
+    assert.Len(t, events, 1)
+    assert.Equal(t, "Transfer", events[0].EventName)
+}
+```
+
+## End-to-End Testing
+
+### GraphQL API Testing
+
+```go
+import (
+    "github.com/99designs/gqlgen/graphql/handler"
+    "github.com/99designs/gqlgen/graphql/handler/testserver"
+)
+
+func TestGraphQLQueries(t *testing.T) {
+    // Setup test database with sample data
+    db, cleanup := setupTestDB(t)
+    defer cleanup()
+    seedTestData(t, db)
+    
+    // Create GraphQL server
+    resolver := &Resolver{db: db}
+    srv := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{
+        Resolvers: resolver,
+    }))
+    
+    tests := []struct {
+        name     string
+        query    string
+        want     string
+        wantErr  bool
+    }{
+        {
+            name: "fetch events",
+            query: `
+                query {
+                    events(contractAddress: "0x...", first: 10) {
+                        edges {
+                            node {
+                                eventName
+                                blockNumber
+                            }
+                        }
+                    }
+                }
+            `,
+            want: `{"data":{"events":{"edges":[{"node":{"eventName":"Transfer","blockNumber":1000}}]}}}`,
+        },
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            resp := srv.ServeHTTP(httptest.NewRecorder(), 
+                httptest.NewRequest("POST", "/graphql", strings.NewReader(tt.query)))
+            
+            if tt.wantErr {
+                assert.NotEqual(t, 200, resp.Code)
+                return
+            }
+            
+            assert.Equal(t, 200, resp.Code)
+            assert.JSONEq(t, tt.want, resp.Body.String())
+        })
+    }
+}
+```
+
+## Testing Reorg Handling
+
+```go
+func TestReorgHandler(t *testing.T) {
+    db, cleanup := setupTestDB(t)
+    defer cleanup()
+    
+    storage := NewStorage(db)
+    handler := NewReorgHandler(storage)
+    
+    // Setup: Index events on main chain
+    mainChainEvents := []Event{
+        {BlockNumber: 100, TxHash: "0xabc", EventName: "Transfer"},
+        {BlockNumber: 101, TxHash: "0xdef", EventName: "Transfer"},
+        {BlockNumber: 102, TxHash: "0xghi", EventName: "Transfer"},
+    }
+    
+    for _, e := range mainChainEvents {
+        err := storage.InsertEvent(context.Background(), &e)
+        require.NoError(t, err)
+    }
+    
+    // Simulate reorg at block 101
+    err := handler.HandleReorg(context.Background(), 100)
+    require.NoError(t, err)
+    
+    // Verify: Events after block 100 are removed
+    events, err := storage.GetEventsByBlockRange(context.Background(), "0x...", 100, 102)
+    require.NoError(t, err)
+    assert.Len(t, events, 1)
+    assert.Equal(t, uint64(100), events[0].BlockNumber)
+}
+```
+
+## Performance Testing
+
+```go
+func BenchmarkBulkInsert(b *testing.B) {
+    db, cleanup := setupTestDB(b)
+    defer cleanup()
+    
+    storage := NewStorage(db)
+    
+    // Prepare test data
+    events := make([]Event, 1000)
+    for i := range events {
+        events[i] = Event{
+            ContractAddress: "0x1234567890123456789012345678901234567890",
+            EventName:      "Transfer",
+            BlockNumber:    uint64(i),
+            TxHash:         fmt.Sprintf("0x%064x", i),
+            LogIndex:       0,
+            Args:           EventArgs{"from": "0x...", "to": "0x...", "value": "100"},
+        }
+    }
+    
+    b.ResetTimer()
+    for i := 0; i < b.N; i++ {
+        storage.BulkInsertEvents(context.Background(), events)
+    }
+}
+
+// Target: >10,000 inserts/second using COPY protocol
+```
+
+## Test Coverage Goals
+
+```bash
+# Run tests with coverage
+go test -v -race -coverprofile=coverage.out ./...
+
+# View coverage report
+go tool cover -html=coverage.out
+
+# Coverage targets:
+# - Core business logic: >80%
+# - API handlers: >70%
+# - Overall: >75%
+```
+
+## Testing Best Practices
+
+### 1. Use Test Fixtures
+```go
+func loadTestData(t *testing.T, filename string) []types.Log {
+    data, err := os.ReadFile(filepath.Join("testdata", filename))
+    require.NoError(t, err)
+    
+    var logs []types.Log
+    err = json.Unmarshal(data, &logs)
+    require.NoError(t, err)
+    
+    return logs
+}
+```
+
+### 2. Clean Up Resources
+```go
+func TestWithCleanup(t *testing.T) {
+    client := setupClient(t)
+    t.Cleanup(func() {
+        client.Close()
+    })
+    
+    // test code
+}
+```
+
+### 3. Parallel Tests
+```go
+func TestParallel(t *testing.T) {
+    tests := []struct{
+        name string
+        // ...
+    }{
+        // test cases
+    }
+    
+    for _, tt := range tests {
+        tt := tt // Capture range variable
+        t.Run(tt.name, func(t *testing.T) {
+            t.Parallel()
+            // test code
+        })
+    }
+}
+```
+
+### 4. Skip Long Tests
+```go
+func TestLongRunning(t *testing.T) {
+    if testing.Short() {
+        t.Skip("Skipping long-running test in short mode")
+    }
+    
+    // long test
+}
+
+// Run: go test -short  (skips long tests)
+```
+
+## CI/CD Integration
+
+```yaml
+# .github/workflows/test.yml
+name: Tests
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+    
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+      
+      - name: Run tests
+        run: |
+          go test -v -race -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.out
+```
+
+## Critical Testing Reminders
+
+1. **Use table-driven tests** for comprehensive coverage
+2. **Mock external dependencies** (blockchain, database)
+3. **Use Testcontainers** for integration tests
+4. **Test with real blockchain** using Ganache/Hardhat
+5. **Test reorg scenarios** explicitly
+6. **Measure test coverage** and aim for >75%
+7. **Use race detector** in CI: `go test -race`
+8. **Clean up resources** with `t.Cleanup()` or defer
+9. **Skip long tests** in short mode: `testing.Short()`
+10. **Run tests in parallel** when possible for speed
+11. **Test error cases** and edge conditions thoroughly
+12. **Benchmark critical paths** like bulk inserts

@@ -1,0 +1,791 @@
+---
+description: Documentation and progress tracking standards for feature development
+globs:
+  - "docs/**/*"
+  - "CHANGELOG.md"
+  - "**/*.md"
+alwaysApply: true
+---
+
+# Documentation & Progress Tracking Standards
+
+You are maintaining comprehensive documentation and development logs for the Smart Contract Event Indexer project. Every feature, fix, and debug session must be documented with detailed logs for future review.
+
+## Documentation Structure
+
+```
+docs/
+├── development/
+│   ├── features/
+│   │   ├── 001-blockchain-listener.md
+│   │   ├── 002-graphql-api.md
+│   │   └── 003-reorg-handling.md
+│   ├── bugs/
+│   │   ├── 001-rpc-connection-timeout.md
+│   │   └── 002-database-deadlock.md
+│   └── debug-sessions/
+│       ├── 2025-01-15-indexing-delay-investigation.md
+│       └── 2025-01-20-memory-leak-analysis.md
+├── architecture/
+│   ├── decisions/
+│   │   ├── 001-why-microservices.md
+│   │   └── 002-database-indexing-strategy.md
+│   └── diagrams/
+├── api/
+│   ├── graphql-reference.md
+│   └── rest-endpoints.md
+└── deployment/
+    ├── production-checklist.md
+    └── troubleshooting-guide.md
+```
+
+## Feature Development Log Template
+
+When implementing a new feature, create a detailed log in `docs/development/features/`:
+
+```markdown
+# Feature: [Feature Name]
+
+**Feature ID**: XXX
+**Status**: 🟡 In Progress | ✅ Complete | 🔴 Blocked
+**Started**: YYYY-MM-DD
+**Completed**: YYYY-MM-DD
+**Developer**: [Your Name]
+**Related TODO**: [Link to task in smart_contract_event_indexer_plan.md]
+
+---
+
+## Overview
+
+**Problem Statement**: What problem does this feature solve?
+
+**User Story**: As a [user type], I want [goal] so that [benefit].
+
+**Success Criteria**: 
+- [ ] Criterion 1
+- [ ] Criterion 2
+- [ ] Criterion 3
+
+---
+
+## Design Decisions
+
+### Architecture
+- **Approach**: [Describe the technical approach]
+- **Alternatives Considered**: 
+  1. Option A - [Why rejected]
+  2. Option B - [Why rejected]
+- **Chosen Solution**: [Why this was selected]
+
+### Technology Stack
+- **Primary**: [Language/Framework]
+- **Dependencies**: [List new dependencies added]
+
+---
+
+## Implementation Log
+
+### Day 1 - YYYY-MM-DD
+**Time Spent**: X hours
+**Progress**:
+- [x] Set up basic structure
+- [x] Implemented core logic
+- [ ] Added tests
+
+**Challenges**:
+- Challenge 1: [Description]
+  - Solution: [How it was resolved]
+
+**Code Changes**:
+- Files modified: `service/handler.go`, `internal/parser/event.go`
+- Lines added: +150
+- Lines removed: -20
+- Commits: `feat(parser): add ERC721 support` (hash: abc123)
+
+**Notes**: 
+- Discovered that ABI parsing requires special handling for tuple types
+- Need to refactor error handling in next session
+
+### Day 2 - YYYY-MM-DD
+**Time Spent**: X hours
+**Progress**:
+- [x] Added comprehensive tests
+- [x] Refactored error handling
+- [x] Updated documentation
+
+**Challenges**:
+- Challenge: Test coverage not reaching target
+  - Solution: Added edge case tests for invalid ABIs
+
+**Code Changes**:
+- Files modified: `service/handler_test.go`
+- Commits: `test(parser): add edge case tests` (hash: def456)
+
+---
+
+## Testing
+
+### Unit Tests
+- **Coverage**: 85%
+- **Test Files**: `parser_test.go`, `handler_test.go`
+- **Key Test Cases**:
+  - Valid ERC721 Transfer event parsing
+  - Invalid ABI error handling
+  - Tuple type decoding
+
+### Integration Tests
+- **Test Scenario**: Deploy ERC721 contract, mint token, verify indexing
+- **Results**: All tests passing
+- **Performance**: Event indexed in 3.2 seconds (target: <5s)
+
+---
+
+## Performance Impact
+
+### Benchmarks
+```
+BenchmarkParseERC721Event-8    50000    28456 ns/op    4096 B/op    12 allocs/op
+```
+
+### Metrics
+- **Before**: N/A (new feature)
+- **After**: 
+  - Memory usage: +15MB (acceptable)
+  - CPU usage: +5% (acceptable)
+  - Indexing throughput: 1200 events/sec
+
+---
+
+## Documentation Updates
+
+- [x] Updated GraphQL schema documentation
+- [x] Added API examples to README
+- [x] Created migration guide for existing users
+- [x] Updated architecture diagram
+
+**Files Updated**:
+- `docs/api/graphql-reference.md`
+- `README.md`
+- `docs/architecture/diagrams/system-architecture.png`
+
+---
+
+## Database Changes
+
+### Migrations
+- **Migration**: `002_add_token_metadata_table.sql`
+- **Reversible**: Yes
+- **Impact**: Adds new table, no data loss
+
+### Schema Changes
+```sql
+CREATE TABLE token_metadata (
+    id SERIAL PRIMARY KEY,
+    contract_address VARCHAR(42) NOT NULL,
+    token_id VARCHAR(78) NOT NULL,
+    metadata JSONB,
+    UNIQUE(contract_address, token_id)
+);
+```
+
+---
+
+## TODO Items Completed
+
+From `docs/smart_contract_event_indexer_plan.md`:
+
+**Phase 2, Section 2.2 - Event Parsing Module**:
+- [x] ~~实现 ABI 解析器~~ ✅ Completed 2025-01-15
+- [x] ~~实现 Event Log 解析器~~ ✅ Completed 2025-01-15
+- [x] ~~处理特殊类型 - Tuple 类型展开~~ ✅ Completed 2025-01-16
+- [x] ~~测试用例 - ERC721 Transfer Event~~ ✅ Completed 2025-01-16
+
+**Updated in**: `docs/smart_contract_event_indexer_plan.md` line 234-242
+
+---
+
+## Deployment Notes
+
+### Prerequisites
+- Go 1.21+
+- PostgreSQL 15+
+- Updated ABI files in `contracts/abi/`
+
+### Deployment Steps
+1. Run migration: `make migrate-up`
+2. Restart indexer service: `docker-compose restart indexer-service`
+3. Verify with health check: `curl localhost:8080/health`
+
+### Rollback Plan
+- Revert commits: `git revert abc123..def456`
+- Rollback migration: `make migrate-down`
+
+---
+
+## Future Improvements
+
+### Known Limitations
+1. Tuple parsing only supports up to 3 levels of nesting
+2. Performance degrades with >100 tuple fields
+
+### Next Steps
+- [ ] Add support for deeply nested tuples
+- [ ] Optimize memory allocation in parser
+- [ ] Add caching for frequently parsed ABIs
+
+### Technical Debt
+- TODO: Refactor parser to use visitor pattern
+- TODO: Extract ABI loading to separate service
+
+---
+
+## References
+
+### Related Issues
+- GitHub Issue #42: Support ERC721 token metadata
+- Discussion: https://github.com/project/discussions/15
+
+### Documentation
+- ERC721 Specification: https://eips.ethereum.org/EIPS/eip-721
+- go-ethereum ABI docs: https://pkg.go.dev/github.com/ethereum/go-ethereum/accounts/abi
+
+### Code References
+- Similar implementation: https://github.com/example/blockchain-indexer
+- ABI parsing reference: `shared/utils/abi_parser.go`
+
+---
+
+## Sign-off
+
+**Developer**: [Your Name]
+**Reviewed By**: [Reviewer Name] (if applicable)
+**Date**: YYYY-MM-DD
+**Status**: ✅ Ready for Production
+
+**Final Checklist**:
+- [x] Code merged to main branch
+- [x] All tests passing
+- [x] Documentation updated
+- [x] TODO items marked complete
+- [x] Performance targets met
+- [x] Deployment plan verified
+```
+
+## Bug Fix Log Template
+
+When fixing a bug, create a log in `docs/development/bugs/`:
+
+```markdown
+# Bug Fix: [Bug Title]
+
+**Bug ID**: BUG-XXX
+**Severity**: 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low
+**Status**: 🔴 Open | 🟡 In Progress | ✅ Fixed | ⏸️ Deferred
+**Reported**: YYYY-MM-DD
+**Fixed**: YYYY-MM-DD
+**Reported By**: [Name/User]
+**Fixed By**: [Developer Name]
+
+---
+
+## Bug Description
+
+**Symptoms**: 
+- What was observed?
+- Error messages?
+- When does it occur?
+
+**Impact**: 
+- How many users affected?
+- Data corruption risk?
+- Service downtime?
+
+**Reproduction Steps**:
+1. Step 1
+2. Step 2
+3. Step 3
+
+**Expected Behavior**: [What should happen]
+
+**Actual Behavior**: [What actually happens]
+
+---
+
+## Root Cause Analysis
+
+### Investigation Process
+
+**Initial Hypothesis**: [First theory about the cause]
+
+**Investigation Log**:
+
+#### 2025-01-15 10:00 - Initial Investigation
+- Reviewed error logs in Grafana
+- Found spike in RPC timeout errors
+- Hypothesis: RPC node unstable
+
+#### 2025-01-15 14:00 - Deep Dive
+- Analyzed RPC response times: Avg 500ms, P99 5s
+- Checked fallback logic: Not triggering due to wrong error type
+- **Root Cause Identified**: Fallback only catches connection errors, not timeout errors
+
+### Root Cause
+**Category**: Logic Error
+**Location**: `internal/blockchain/rpc_manager.go:45`
+**Description**: 
+```go
+// BUG: Only catches connection errors
+if err == rpc.ErrClientQuit {
+    return m.tryFallback(ctx)
+}
+
+// SHOULD BE:
+if err == rpc.ErrClientQuit || isTimeoutError(err) {
+    return m.tryFallback(ctx)
+}
+```
+
+---
+
+## Solution
+
+### Fix Implementation
+
+**Approach**: Add timeout error detection to RPC manager fallback logic
+
+**Code Changes**:
+
+**File**: `internal/blockchain/rpc_manager.go`
+```go
+// Before (Lines 45-48)
+if err == rpc.ErrClientQuit {
+    return m.tryFallback(ctx)
+}
+
+// After (Lines 45-52)
+func (m *RPCManager) shouldFallback(err error) bool {
+    return err == rpc.ErrClientQuit || 
+           isTimeoutError(err) || 
+           isConnectionError(err)
+}
+
+if m.shouldFallback(err) {
+    return m.tryFallback(ctx)
+}
+```
+
+**Commit**: `fix(rpc): handle timeout errors in fallback logic` (hash: xyz789)
+
+---
+
+## Testing
+
+### Test Cases Added
+```go
+func TestRPCManager_TimeoutFallback(t *testing.T) {
+    // Test that timeout errors trigger fallback
+    mockClient := &mockRPCClient{
+        err: &url.Error{Err: context.DeadlineExceeded},
+    }
+    manager := NewRPCManager(mockClient, fallbackClients)
+    
+    _, err := manager.Call(ctx, "eth_blockNumber")
+    
+    assert.NoError(t, err)
+    assert.True(t, fallbackClients[0].called)
+}
+```
+
+### Verification
+- [x] Unit tests pass
+- [x] Integration tests pass
+- [x] Manual testing with RPC node delay simulation
+- [x] Monitoring shows fallback triggers correctly
+
+---
+
+## Rollout Plan
+
+### Deployment
+1. Deploy to staging: 2025-01-16 10:00
+2. Monitor for 24 hours
+3. Deploy to production: 2025-01-17 10:00
+
+### Monitoring
+- Watch RPC fallback count metric
+- Alert if primary RPC failure rate >10%
+- Monitor indexing delay doesn't increase
+
+### Rollback Criteria
+- If indexing delay >10s for >5 minutes
+- If error rate increases >2%
+
+---
+
+## Prevention
+
+### Process Improvements
+- [ ] Add integration test for RPC timeout scenarios
+- [ ] Add monitoring alert for RPC response times
+- [ ] Document RPC error handling patterns
+
+### Technical Improvements
+- [ ] Refactor error handling to use error type system
+- [ ] Add circuit breaker for RPC connections
+- [ ] Implement health check for RPC nodes
+
+---
+
+## Related Issues
+- Similar issue: BUG-025 (RPC connection drops)
+- Related feature: FEAT-012 (Multi-RPC support)
+
+---
+
+## Sign-off
+**Fixed By**: [Developer Name]
+**Verified By**: [QA Name]
+**Date**: YYYY-MM-DD
+**Status**: ✅ Deployed to Production
+```
+
+## Debug Session Log Template
+
+For complex debugging sessions, create a log in `docs/development/debug-sessions/`:
+
+```markdown
+# Debug Session: [Issue Description]
+
+**Date**: YYYY-MM-DD
+**Duration**: X hours
+**Debugger**: [Your Name]
+**Issue**: [Brief description]
+
+---
+
+## Timeline
+
+### 09:00 - Session Start
+**Observation**: Indexing delay increased from 5s to 45s
+**Metrics**:
+- Database query time: Normal (50ms avg)
+- RPC response time: Normal (200ms avg)
+- Event processing queue: Growing (1000+ events backlog)
+
+### 09:30 - Initial Hypothesis
+**Theory**: Database write bottleneck
+**Tests**:
+- Checked PostgreSQL slow query log: No slow queries
+- Checked connection pool: 5/20 connections in use
+- **Result**: Database not the issue
+
+### 10:00 - Second Hypothesis
+**Theory**: Event parsing bottleneck
+**Tests**:
+- Added profiling: `go tool pprof http://localhost:6060/debug/pprof/profile`
+- CPU profile shows 60% time in JSON marshaling
+- **Result**: Found the bottleneck!
+
+### 10:30 - Root Cause
+**Finding**: Event args marshaling is inefficient
+```go
+// Current code (inefficient)
+for _, event := range events {
+    jsonData, _ := json.Marshal(event.Args)  // Marshaling inside loop
+    db.Insert(event.ID, jsonData)
+}
+
+// Should be:
+stmt := db.Prepare(...)
+for _, event := range events {
+    stmt.Exec(event.ID, event.Args)  // Let database driver handle JSON
+}
+```
+
+### 11:00 - Solution Implemented
+**Fix**: Use database driver's native JSON handling
+**Benchmark**:
+- Before: 45s for 1000 events
+- After: 8s for 1000 events (5.6x improvement)
+
+---
+
+## Tools Used
+- pprof: CPU and memory profiling
+- Grafana: Real-time metrics
+- PostgreSQL logs: Query analysis
+- Custom benchmark: `make bench-parser`
+
+---
+
+## Key Learnings
+1. Always profile before optimizing
+2. Standard library JSON marshaling can be slow in tight loops
+3. Database drivers often have optimized paths for common operations
+
+---
+
+## Action Items
+- [x] Fix inefficient JSON marshaling
+- [x] Add benchmark tests for event processing
+- [ ] Create runbook for performance debugging
+- [ ] Add automated performance regression tests
+```
+
+## Mandatory Workflow
+
+### Before Starting Any Task
+
+1. **Check TODO List** in `docs/smart_contract_event_indexer_plan.md`
+2. **Create Feature/Bug Log** using appropriate template
+3. **Set up branch**: `git checkout -b feature/task-name`
+
+### During Development
+
+1. **Update Development Log** daily with:
+   - Time spent
+   - Progress made
+   - Challenges faced
+   - Code changes
+   - Commits made
+
+2. **Document Decisions**:
+   - Why you chose approach A over B
+   - What alternatives you considered
+   - Trade-offs you made
+
+3. **Keep Notes** of:
+   - Useful resources/links
+   - Debugging commands
+   - Performance measurements
+
+### After Completing Task
+
+1. **Mark TODO as Done**:
+   - In `docs/smart_contract_event_indexer_plan.md`, change `- [ ]` to `- [x]`
+   - Add completion date: `- [x] ~~Task description~~ ✅ Completed YYYY-MM-DD`
+
+2. **Update Feature Log**:
+   - Set status to ✅ Complete
+   - Fill in completion date
+   - Complete final checklist
+   - Add sign-off
+
+3. **Update Related Documentation**:
+   - API documentation if endpoints changed
+   - Architecture diagrams if structure changed
+   - README if setup changed
+   - Migration guides if breaking changes
+
+4. **Update CHANGELOG.md**:
+```markdown
+## [Unreleased]
+
+### Added
+- ERC721 token support in event parser (#42)
+- Fallback RPC error handling for timeouts
+
+### Fixed  
+- RPC manager not falling back on timeout errors (BUG-031)
+
+### Changed
+- Optimized JSON marshaling in event processing (5.6x speedup)
+```
+
+5. **Create PR with Comprehensive Description**:
+```markdown
+## Feature: ERC721 Support
+
+**Related TODO**: Phase 2, Section 2.2 - Event Parsing Module
+**Documentation**: docs/development/features/002-erc721-support.md
+
+### Summary
+Adds support for parsing ERC721 Transfer events with metadata.
+
+### Changes
+- Modified `internal/parser/event.go` to handle tuple types
+- Added `token_metadata` table
+- Updated GraphQL schema with token queries
+
+### Testing
+- Added 15 unit tests (coverage: 85%)
+- Integration tests with real ERC721 contract
+- Performance: 1200 events/sec
+
+### Documentation
+- [x] Feature log completed
+- [x] API docs updated  
+- [x] Architecture diagram updated
+- [x] TODO items marked done
+
+### Checklist
+- [x] Tests passing
+- [x] Documentation updated
+- [x] No breaking changes
+- [x] Performance targets met
+```
+
+## Progress Tracking Dashboard
+
+Maintain a `docs/PROGRESS.md` file:
+
+```markdown
+# Project Progress Dashboard
+
+**Last Updated**: 2025-01-20
+**Overall Progress**: 45% (18/40 major tasks)
+
+---
+
+## Phase Overview
+
+| Phase | Status | Progress | Completion |
+|-------|--------|----------|------------|
+| Phase 1: Infrastructure | ✅ Complete | 5/5 | 2025-01-10 |
+| Phase 2: Indexer Core | 🟡 In Progress | 6/8 | ETA: 2025-01-25 |
+| Phase 3: API Layer | ⏳ Not Started | 0/10 | ETA: 2025-02-05 |
+| Phase 4: Testing | ⏳ Not Started | 0/8 | ETA: 2025-02-15 |
+| Phase 5: Deployment | ⏳ Not Started | 0/9 | ETA: 2025-02-25 |
+
+---
+
+## Current Sprint (Week 2)
+
+**Goal**: Complete Indexer Core functionality
+
+### Tasks This Week
+- [x] Blockchain connection module ✅ 2025-01-15
+- [x] Event parsing for ERC20/ERC721 ✅ 2025-01-16
+- [x] Database persistence layer ✅ 2025-01-17
+- [🟡] Reorg handling (In Progress)
+- [ ] Indexer integration tests
+
+### Blockers
+- None
+
+### Next Week Preview
+- [ ] Complete reorg handling
+- [ ] Begin GraphQL API development
+- [ ] Set up API Gateway service
+
+---
+
+## Metrics
+
+### Development Velocity
+- **Tasks Completed**: 18
+- **This Week**: 3 tasks
+- **Average**: 3.6 tasks/week
+
+### Code Statistics
+- **Lines of Code**: 8,450
+- **Test Coverage**: 78%
+- **Services Implemented**: 2/4
+
+### Performance Metrics
+- **Indexing Delay**: 6.2s (target: <5s) 🟡
+- **API Response**: Not yet implemented
+- **Test Coverage**: 78% (target: >75%) ✅
+
+---
+
+## Upcoming Milestones
+
+- [ ] Week 3: GraphQL API functional
+- [ ] Week 4: All services integrated
+- [ ] Week 5: Performance targets met
+- [ ] Week 6: Ready for production
+
+---
+
+## Recent Highlights
+
+### This Week (2025-01-15 to 2025-01-20)
+- ✅ Completed ERC721 support
+- ✅ Fixed critical RPC timeout bug
+- ✅ Achieved 78% test coverage
+- 🎯 Performance improved by 5.6x in event processing
+
+### Challenges Overcome
+- RPC fallback logic bug (BUG-031)
+- JSON marshaling performance issue
+- Tuple type parsing complexity
+```
+
+## Critical Reminders
+
+### Documentation Checklist for EVERY Task
+
+- [ ] Create feature/bug log at task start
+- [ ] Update log daily with progress
+- [ ] Document all design decisions
+- [ ] Keep track of time spent
+- [ ] Note all challenges and solutions
+- [ ] List all code changes and commits
+- [ ] Update relevant documentation
+- [ ] Mark TODO items as done
+- [ ] Update CHANGELOG.md
+- [ ] Update PROGRESS.md
+- [ ] Create comprehensive PR description
+- [ ] Add sign-off when complete
+
+### What to Document
+
+**Always Document**:
+- ✅ Why you made a decision (not just what)
+- ✅ Alternatives you considered
+- ✅ Trade-offs and compromises
+- ✅ Performance measurements
+- ✅ Breaking changes
+- ✅ Migration steps
+- ✅ Debugging process and learnings
+- ✅ Future improvement ideas
+- ✅ Technical debt created
+
+**Never Skip**:
+- ❌ Don't skip documentation because "code is self-documenting"
+- ❌ Don't forget to mark TODOs as done
+- ❌ Don't commit without updating CHANGELOG
+- ❌ Don't merge without comprehensive PR description
+- ❌ Don't leave feature logs incomplete
+
+### Review Checklist Before Moving On
+
+Before considering a task "done":
+
+1. [ ] Feature/bug log is complete and signed off
+2. [ ] All TODO items marked as done in project plan
+3. [ ] CHANGELOG.md updated
+4. [ ] PROGRESS.md updated
+5. [ ] API documentation updated (if applicable)
+6. [ ] Architecture docs updated (if applicable)
+7. [ ] README updated (if applicable)
+8. [ ] Tests written and passing
+9. [ ] Code reviewed and merged
+10. [ ] Deployment notes documented
+
+---
+
+## Benefits of This Approach
+
+**For Current Development**:
+- Clear progress visibility
+- Easy context switching (detailed logs help resume work)
+- Better decision documentation
+- Reduced duplicate work
+
+**For Future Reference**:
+- Understand why decisions were made
+- Learn from past debugging sessions
+- Estimate future similar tasks accurately
+- Onboard new team members faster
+
+**For Portfolio**:
+- Demonstrate systematic approach
+- Show problem-solving process
+- Highlight technical depth
+- Prove attention to detail
+
+---
+
+**Remember**: Documentation is not overhead—it's an investment in your project's future and your professional growth!

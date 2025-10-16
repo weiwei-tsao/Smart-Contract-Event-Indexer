@@ -1,0 +1,479 @@
+---
+description: Project workflow, common commands, and development best practices
+globs: 
+  - "Makefile"
+  - "README.md"
+  - ".github/**/*"
+alwaysApply: true
+---
+
+# Smart Contract Event Indexer - Project Workflow
+
+You are working on a production-grade Smart Contract Event Indexer with Go microservices. This rule provides essential project context, common workflows, and development best practices.
+
+## Project Overview
+
+**Purpose**: High-performance blockchain event indexer that monitors smart contract events, parses and stores them in PostgreSQL, and exposes GraphQL/REST APIs for fast queries.
+
+**Core Value Propositions**:
+- Solve slow/expensive direct blockchain queries
+- Provide fast historical data access for DApps
+- Support complex data aggregation and analytics
+- Handle blockchain reorganizations reliably
+
+**Target Performance**:
+- Event indexing delay: <5 seconds (Ethereum mainnet)
+- API response time: P95 <200ms
+- Throughput: 1000+ events/second
+- Data accuracy: 99.99% (with reorg handling)
+
+## Architecture Quick Reference
+
+```
+┌─────────────────────────────────────────┐
+│  Client (DApp / Dashboard / Analytics)  │
+└──────────────┬──────────────────────────┘
+               │ GraphQL/REST
+┌──────────────▼──────────────────────────┐
+│         API Gateway (Port 8000)         │
+│  - GraphQL (gqlgen) / REST (Gin)       │
+│  - Auth & Rate Limiting                 │
+└──────────────┬──────────────────────────┘
+               │ gRPC
+┌──────────────▼──────────────────────────┐
+│  Query Service (8081) | Admin (8082)   │
+│  - Caching (Redis)    | - Management   │
+│  - Aggregations       | - Monitoring   │
+└──────────────┬──────────────────────────┘
+               │
+┌──────────────▼──────────────────────────┐
+│      Indexer Service (Port 8080)        │
+│  - Blockchain Monitoring (WebSocket)    │
+│  - Event Parsing (go-ethereum)          │
+│  - Reorg Handling                       │
+└──────────────┬──────────────────────────┘
+               │
+         ┌─────┴──────┐
+         ▼            ▼
+    PostgreSQL    Blockchain Node
+    + Redis       (Geth/Infura)
+```
+
+## Mono-Repo Structure
+
+```
+mono-repo/
+├── services/
+│   ├── indexer-service/      # Blockchain event indexing
+│   ├── api-gateway/          # Public API endpoints
+│   ├── query-service/        # Query optimization
+│   └── admin-service/        # Admin & monitoring
+├── shared/
+│   ├── proto/                # gRPC definitions
+│   ├── models/               # Common data models
+│   ├── utils/                # Shared utilities
+│   └── config/               # Configuration management
+├── migrations/               # Database migrations
+├── graphql/                  # GraphQL schema
+├── infrastructure/           # Docker, K8s, Terraform
+├── docs/                     # Documentation
+├── Makefile                  # Common tasks
+├── docker-compose.yml        # Local development
+└── go.work                   # Go workspace
+```
+
+## Common Development Commands
+
+### Initial Setup
+```bash
+# Start development environment
+make dev-up
+
+# Run database migrations
+make migrate-up
+
+# Generate code (gRPC, GraphQL)
+make generate
+
+# Install dependencies
+make deps
+```
+
+### Daily Development
+```bash
+# Run tests
+make test
+
+# Run tests with coverage
+make test-coverage
+
+# Run linter
+make lint
+
+# Format code
+make fmt
+
+# Build all services
+make build
+
+# Run specific service
+make run-indexer
+make run-api
+```
+
+### Docker Commands
+```bash
+# Build Docker images
+make docker-build
+
+# Start all services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f indexer-service
+
+# Stop all services
+docker-compose down
+```
+
+## Development Workflow
+
+### 1. Adding a New Feature
+
+```bash
+# Create feature branch
+git checkout -b feature/add-new-endpoint
+
+# Make changes...
+
+# Run tests
+make test
+
+# Run linter
+make lint
+
+# Commit with conventional commits
+git commit -m "feat(api): add new endpoint for event filtering"
+
+# Push and create PR
+git push origin feature/add-new-endpoint
+```
+
+### 2. Adding a New Smart Contract
+
+```graphql
+# Use GraphQL mutation
+mutation {
+  addContract(input: {
+    address: "0x..."
+    abi: "[...]"
+    name: "UniswapV3Pool"
+    startBlock: 12345678
+  }) {
+    success
+    contract {
+      id
+      address
+    }
+    isNew
+    message
+  }
+}
+```
+
+### 3. Triggering Historical Backfill
+
+```graphql
+mutation {
+  triggerBackfill(input: {
+    contractAddress: "0x..."
+    fromBlock: 12000000
+    toBlock: 12500000
+  }) {
+    success
+    jobId
+    estimatedTime
+  }
+}
+```
+
+## Key Technical Decisions
+
+### Why These Technologies?
+
+**Go**: High performance, excellent concurrency, strong blockchain ecosystem
+**PostgreSQL**: ACID compliance, JSONB for flexible event args, excellent indexing
+**Redis**: Fast caching, reduces database load
+**GraphQL**: Flexible queries, efficient for clients needing specific data
+**gRPC**: Fast inter-service communication with type safety
+**gqlgen**: Code generation from schema-first approach
+
+### Database Design Decisions
+
+1. **JSONB for event args**: Flexible schema, supports any event type
+2. **GIN indexes on JSONB**: Fast queries on event arguments (MVP phase)
+3. **event_addresses table**: Phase 3 optimization for address lookups
+4. **Denormalized contract_address**: Trade space for query speed
+5. **Composite indexes**: Optimize for common query patterns
+
+### Reorg Handling Strategy
+
+1. Cache last 50 block hashes
+2. On new block, verify parent hash matches cache
+3. If mismatch detected → reorg identified
+4. Rollback database to fork point
+5. Reindex from fork point forward
+
+## Critical Error Scenarios & Solutions
+
+### 1. RPC Node Unavailable
+```go
+// Implement fallback nodes
+rpcs := []string{
+    "wss://mainnet.infura.io/ws/v3/KEY",
+    "wss://eth-mainnet.g.alchemy.com/v2/KEY",
+    "https://cloudflare-eth.com",
+}
+
+// Retry with exponential backoff
+```
+
+### 2. Chain Reorganization
+```go
+// Detect reorg
+if cachedHash != block.ParentHash {
+    // Rollback to fork point
+    handleReorg(forkBlock)
+    // Resume indexing
+}
+```
+
+### 3. Database Connection Pool Exhausted
+```go
+// Configure appropriate pool size
+db.SetMaxOpenConns(20)
+db.SetMaxIdleConns(5)
+db.SetConnMaxLifetime(5 * time.Minute)
+```
+
+### 4. Slow Queries
+```sql
+-- Add missing indexes
+CREATE INDEX idx_events_contract_block 
+ON events(contract_address, block_number DESC);
+
+-- Use EXPLAIN ANALYZE
+EXPLAIN ANALYZE SELECT ...
+```
+
+## Performance Optimization Checklist
+
+### Indexer Service
+- [ ] Use WebSocket instead of HTTP polling
+- [ ] Batch event fetching (100-500 events)
+- [ ] Implement connection pooling
+- [ ] Use COPY protocol for bulk inserts
+- [ ] Cache recent block hashes (Redis)
+- [ ] Handle graceful shutdown
+
+### API Gateway
+- [ ] Implement DataLoaders (prevent N+1)
+- [ ] Add Redis caching layer
+- [ ] Set query complexity limits
+- [ ] Enable response compression
+- [ ] Implement rate limiting
+- [ ] Use connection pooling
+
+### Database
+- [ ] Create appropriate indexes
+- [ ] Use composite indexes for common queries
+- [ ] Implement query result caching
+- [ ] Regular VACUUM and ANALYZE
+- [ ] Monitor slow query log
+- [ ] Use prepared statements
+
+## Monitoring Checklist
+
+- [ ] Expose Prometheus metrics
+- [ ] Create Grafana dashboards
+- [ ] Set up alerting (PagerDuty/Slack)
+- [ ] Implement structured logging
+- [ ] Track indexing delay
+- [ ] Monitor RPC call failures
+- [ ] Track API response times
+- [ ] Monitor database connection pool
+
+## Security Best Practices
+
+### Input Validation
+```go
+// Always validate addresses
+if !common.IsHexAddress(addr) {
+    return errors.New("invalid address")
+}
+
+// Validate block ranges
+if toBlock < fromBlock {
+    return errors.New("invalid block range")
+}
+```
+
+### Authentication
+```go
+// Use JWT tokens
+token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+signedToken, _ := token.SignedString(secretKey)
+```
+
+### Rate Limiting
+```go
+// Implement rate limiting
+limiter := rate.NewLimiter(rate.Limit(100), 200)
+if !limiter.Allow() {
+    http.Error(w, "rate limit exceeded", 429)
+    return
+}
+```
+
+## Common Pitfalls to Avoid
+
+### ❌ Don't Do This
+```go
+// Don't store big.Int directly in JSON
+event.Value = bigInt  // ❌ Loses precision
+
+// Don't forget to handle context cancellation
+go func() {
+    // long operation without checking ctx.Done()
+}
+
+// Don't use string concatenation for SQL
+query := "SELECT * FROM events WHERE address = '" + addr + "'"  // ❌ SQL injection
+```
+
+### ✅ Do This Instead
+```go
+// Convert to string for JSON
+event.Value = bigInt.String()  // ✅ Preserves precision
+
+// Always check context
+select {
+case <-ctx.Done():
+    return ctx.Err()
+case result := <-resultCh:
+    return result
+}
+
+// Use parameterized queries
+query := "SELECT * FROM events WHERE address = $1"
+rows, err := db.Query(query, addr)  // ✅ Safe from injection
+```
+
+## Git Workflow
+
+### Branch Naming
+- `feature/add-user-auth` - New features
+- `fix/reorg-handling-bug` - Bug fixes
+- `refactor/improve-caching` - Code refactoring
+- `docs/update-readme` - Documentation
+- `test/add-integration-tests` - Test improvements
+
+### Commit Messages (Conventional Commits)
+```
+feat(api): add pagination to events endpoint
+fix(indexer): correct reorg detection logic
+docs(readme): update installation instructions
+test(parser): add tests for ERC721 events
+refactor(storage): optimize batch insert performance
+```
+
+## Environment Variables
+
+```bash
+# RPC Configuration
+RPC_ENDPOINT=wss://mainnet.infura.io/ws/v3/YOUR_KEY
+RPC_FALLBACK_1=https://cloudflare-eth.com
+RPC_FALLBACK_2=https://rpc.ankr.com/eth
+
+# Database
+DATABASE_URL=postgres://user:pass@localhost:5432/event_indexer
+DB_MAX_CONNECTIONS=20
+
+# Redis
+REDIS_URL=redis://localhost:6379
+REDIS_PASSWORD=
+
+# Indexer Settings
+CONFIRM_BLOCKS=12
+BATCH_SIZE=100
+POLL_INTERVAL=6s
+
+# API Settings
+PORT=8000
+CORS_ORIGINS=http://localhost:3000
+RATE_LIMIT=100
+
+# Logging
+LOG_LEVEL=info
+LOG_FORMAT=json
+```
+
+## Quick Reference Links
+
+- **Project Docs**: `/docs/`
+- **GraphQL Schema**: `/graphql/schema.graphql`
+- **API Documentation**: `http://localhost:8000/playground`
+- **Prometheus Metrics**: `http://localhost:9090`
+- **Grafana Dashboard**: `http://localhost:3000`
+
+## Getting Help
+
+1. Check documentation in `/docs/`
+2. Review GraphQL schema for API capabilities
+3. Check logs: `docker-compose logs -f [service-name]`
+4. Inspect metrics at Prometheus endpoint
+5. Review test files for usage examples
+
+## Project Phases (For Reference)
+
+### Phase 1 (Weeks 1-2): Core Infrastructure
+- ✅ Mono-repo setup with Go workspaces
+- ✅ Docker development environment
+- ✅ Indexer service with blockchain monitoring
+- ✅ Event parsing and storage
+- ✅ Reorg handling
+
+### Phase 2 (Week 3): API Layer
+- ✅ GraphQL API with gqlgen
+- ✅ Query service with caching
+- ✅ Admin service for management
+
+### Phase 3 (Week 4): Testing & Optimization
+- ✅ Comprehensive test suite
+- ✅ Performance optimization
+- ✅ Monitoring and alerting
+
+### Phase 4 (Week 5): Deployment
+- ✅ Kubernetes manifests
+- ✅ CI/CD pipeline
+- ✅ Production monitoring
+
+## Critical Success Factors
+
+1. **Reliable RPC Connection**: Use paid nodes (Alchemy/Infura) with fallbacks
+2. **Proper Reorg Handling**: Critical for data integrity
+3. **Database Performance**: Proper indexes and connection pooling
+4. **Monitoring**: Know when things break
+5. **Testing**: Especially for edge cases (reorgs, RPC failures)
+
+## Next Steps When Starting Work
+
+1. Review project requirements in `/docs/smart_contract_event_indexer_prd.md.md`
+2. Check detailed implementation plan in `/docs/smart_contract_event_indexer_plan.md`
+3. Set up local environment: `make dev-up`
+4. Run tests to ensure setup: `make test`
+5. Review GraphQL schema to understand API capabilities
+
+---
+
+**Remember**: This is a portfolio project showcasing microservices, blockchain integration, and production-ready development practices. Focus on code quality, testing, and documentation!

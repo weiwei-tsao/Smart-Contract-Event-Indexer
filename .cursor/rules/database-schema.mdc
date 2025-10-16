@@ -1,0 +1,421 @@
+---
+description: PostgreSQL database schema and query optimization standards
+globs:
+  - "migrations/**/*.sql"
+  - "internal/storage/**/*.go"
+alwaysApply: false
+---
+
+# Database Schema & Query Optimization Standards
+
+You are designing the PostgreSQL database schema for a high-performance blockchain event indexer. Follow these standards for schema design, indexing, and query optimization.
+
+## Core Schema Design
+
+### Contracts Table
+```sql
+CREATE TABLE contracts (
+    id SERIAL PRIMARY KEY,
+    address VARCHAR(42) NOT NULL UNIQUE,  -- Ethereum address with '0x' prefix
+    name VARCHAR(255),
+    abi TEXT NOT NULL,
+    start_block BIGINT NOT NULL,
+    current_block BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    
+    -- Indexes
+    CONSTRAINT address_format CHECK (address ~* '^0x[a-f0-9]{40}$')
+);
+
+CREATE INDEX idx_contracts_address ON contracts(address);
+CREATE INDEX idx_contracts_current_block ON contracts(current_block);
+```
+
+### Events Table (Core Data Store)
+```sql
+CREATE TABLE events (
+    id BIGSERIAL PRIMARY KEY,
+    contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    contract_address VARCHAR(42) NOT NULL,  -- Denormalized for query performance
+    event_name VARCHAR(255) NOT NULL,
+    block_number BIGINT NOT NULL,
+    block_timestamp TIMESTAMP NOT NULL,
+    transaction_hash VARCHAR(66) NOT NULL,  -- '0x' + 64 hex chars
+    log_index INTEGER NOT NULL,
+    args JSONB NOT NULL,  -- Flexible storage for event parameters
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    
+    -- Ensure uniqueness (prevent duplicate indexing)
+    UNIQUE(transaction_hash, log_index),
+    
+    -- Constraints
+    CONSTRAINT tx_hash_format CHECK (transaction_hash ~* '^0x[a-f0-9]{64}$')
+);
+
+-- Critical indexes for query performance
+CREATE INDEX idx_events_contract_address ON events(contract_address);
+CREATE INDEX idx_events_block_number ON events(block_number DESC);
+CREATE INDEX idx_events_block_timestamp ON events(block_timestamp DESC);
+CREATE INDEX idx_events_tx_hash ON events(transaction_hash);
+CREATE INDEX idx_events_event_name ON events(event_name);
+
+-- Composite indexes for common query patterns
+CREATE INDEX idx_events_contract_event ON events(contract_address, event_name);
+CREATE INDEX idx_events_contract_block ON events(contract_address, block_number DESC);
+
+-- GIN index for JSONB args queries (MVP phase)
+CREATE INDEX idx_events_args_gin ON events USING GIN (args);
+
+-- Partial index for recent events (hot data)
+CREATE INDEX idx_events_recent ON events(block_timestamp DESC) 
+WHERE block_timestamp > NOW() - INTERVAL '7 days';
+```
+
+### Event Arguments Optimization (Phase 3)
+
+For high-performance address lookups, create a separate table:
+
+```sql
+-- Phase 3: Dedicated table for address queries
+CREATE TABLE event_addresses (
+    event_id BIGINT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    address VARCHAR(42) NOT NULL,
+    arg_name VARCHAR(50) NOT NULL,  -- 'from', 'to', 'owner', etc.
+    
+    PRIMARY KEY (event_id, address, arg_name)
+);
+
+CREATE INDEX idx_event_addresses_addr ON event_addresses(address);
+CREATE INDEX idx_event_addresses_addr_name ON event_addresses(address, arg_name);
+```
+
+### Indexer State Table
+```sql
+CREATE TABLE indexer_state (
+    contract_id INTEGER PRIMARY KEY REFERENCES contracts(id) ON DELETE CASCADE,
+    last_indexed_block BIGINT NOT NULL,
+    last_block_hash VARCHAR(66) NOT NULL,
+    last_updated TIMESTAMP NOT NULL DEFAULT NOW(),
+    error_count INTEGER DEFAULT 0,
+    last_error TEXT
+);
+```
+
+### Block Cache Table (For Reorg Detection)
+```sql
+CREATE TABLE block_cache (
+    block_number BIGINT PRIMARY KEY,
+    block_hash VARCHAR(66) NOT NULL,
+    parent_hash VARCHAR(66) NOT NULL,
+    timestamp TIMESTAMP NOT NULL,
+    cached_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    
+    CONSTRAINT block_hash_format CHECK (block_hash ~* '^0x[a-f0-9]{64}$')
+);
+
+-- Auto-cleanup old blocks (keep only recent 50)
+CREATE INDEX idx_block_cache_number_desc ON block_cache(block_number DESC);
+
+-- TTL: Delete blocks older than 50 blocks (via cron job)
+```
+
+## Query Patterns & Optimization
+
+### 1. Fetch Events by Contract and Block Range
+```sql
+-- Optimized query using composite index
+SELECT 
+    id, event_name, block_number, block_timestamp,
+    transaction_hash, log_index, args
+FROM events
+WHERE 
+    contract_address = $1
+    AND block_number BETWEEN $2 AND $3
+ORDER BY block_number DESC, log_index
+LIMIT $4 OFFSET $5;
+
+-- Uses: idx_events_contract_block
+```
+
+### 2. Query Events by Address (Using GIN Index - MVP)
+```sql
+-- Phase 1: Using GIN index on JSONB
+SELECT 
+    e.id, e.event_name, e.block_number, e.transaction_hash, e.args
+FROM events e
+WHERE 
+    e.contract_address = $1
+    AND (
+        e.args @> '{"from": "0x..."}'::jsonb OR
+        e.args @> '{"to": "0x..."}'::jsonb
+    )
+ORDER BY e.block_timestamp DESC
+LIMIT $2;
+
+-- Uses: idx_events_args_gin
+-- Performance: Adequate for <100K events, optimize later
+```
+
+### 3. Query Events by Address (Phase 3 - Optimized)
+```sql
+-- Phase 3: Using dedicated address table
+SELECT DISTINCT
+    e.id, e.event_name, e.block_number, e.transaction_hash, e.args
+FROM events e
+INNER JOIN event_addresses ea ON ea.event_id = e.id
+WHERE 
+    ea.address = $1
+    AND e.contract_address = $2  -- Optional filter
+ORDER BY e.block_timestamp DESC
+LIMIT $3;
+
+-- Uses: idx_event_addresses_addr + idx_events_contract_block
+-- Performance: Sub-100ms for millions of events
+```
+
+### 4. Get Events by Transaction Hash
+```sql
+-- Simple lookup with unique index
+SELECT 
+    id, contract_address, event_name, block_number,
+    transaction_hash, log_index, args
+FROM events
+WHERE transaction_hash = $1
+ORDER BY log_index;
+
+-- Uses: idx_events_tx_hash
+```
+
+### 5. Contract Statistics (Cached)
+```sql
+-- Compute stats (cache result in Redis for 5 minutes)
+SELECT 
+    COUNT(*) as total_events,
+    MAX(block_number) as latest_block,
+    MAX(block_timestamp) as latest_timestamp,
+    COUNT(DISTINCT transaction_hash) as total_transactions
+FROM events
+WHERE contract_address = $1;
+
+-- Uses: idx_events_contract_address
+```
+
+## Batch Operations
+
+### Bulk Event Insert (COPY Protocol)
+```go
+// Use PostgreSQL COPY for maximum throughput
+func (s *Storage) BulkInsertEvents(ctx context.Context, events []Event) error {
+    txn, err := s.db.Begin()
+    if err != nil {
+        return err
+    }
+    defer txn.Rollback()
+    
+    stmt, err := txn.Prepare(pq.CopyIn(
+        "events",
+        "contract_id", "contract_address", "event_name",
+        "block_number", "block_timestamp", "transaction_hash",
+        "log_index", "args",
+    ))
+    if err != nil {
+        return err
+    }
+    
+    for _, e := range events {
+        _, err = stmt.Exec(
+            e.ContractID, e.ContractAddress, e.EventName,
+            e.BlockNumber, e.BlockTimestamp, e.TxHash,
+            e.LogIndex, e.Args,
+        )
+        if err != nil {
+            return err
+        }
+    }
+    
+    _, err = stmt.Exec() // Flush
+    if err != nil {
+        return err
+    }
+    
+    return txn.Commit()
+}
+
+// Performance: 10,000+ inserts/second
+```
+
+### Handle Reorg (Atomic Rollback)
+```sql
+-- Rollback events after fork point
+BEGIN;
+
+DELETE FROM events 
+WHERE block_number > $1;  -- fork_block
+
+UPDATE contracts 
+SET current_block = $1
+WHERE current_block > $1;
+
+DELETE FROM block_cache
+WHERE block_number > $1;
+
+COMMIT;
+```
+
+## JSONB Best Practices
+
+### Storing Event Arguments
+```go
+// Store as structured JSONB
+type EventArgs map[string]interface{}
+
+func convertArgs(params []interface{}, names []string) EventArgs {
+    args := make(EventArgs)
+    for i, param := range params {
+        name := names[i]
+        
+        // Handle different types
+        switch v := param.(type) {
+        case *big.Int:
+            args[name] = v.String()  // Preserve precision
+        case common.Address:
+            args[name] = v.Hex()     // Checksum format
+        case []byte:
+            args[name] = hexutil.Encode(v)
+        default:
+            args[name] = v
+        }
+    }
+    return args
+}
+```
+
+### Querying JSONB
+```sql
+-- Extract specific field
+SELECT args->>'from' as sender FROM events WHERE id = 1;
+
+-- Check if key exists
+SELECT * FROM events WHERE args ? 'tokenId';
+
+-- Contains operator (uses GIN index)
+SELECT * FROM events WHERE args @> '{"from": "0x..."}'::jsonb;
+
+-- Path operator for nested values
+SELECT * FROM events WHERE args #>> '{metadata,uri}' LIKE '%ipfs%';
+```
+
+## Connection Pool Configuration
+
+```go
+// Configure connection pool for high throughput
+import "github.com/jmoiron/sqlx"
+
+db, err := sqlx.Connect("postgres", dsn)
+
+// Connection pool settings
+db.SetMaxOpenConns(20)           // Max concurrent connections
+db.SetMaxIdleConns(5)            // Min idle connections
+db.SetConnMaxLifetime(5 * time.Minute)  // Recycle connections
+db.SetConnMaxIdleTime(1 * time.Minute)
+
+// For read replicas (Phase 3)
+readDB, _ := sqlx.Connect("postgres", readReplicaDSN)
+readDB.SetMaxOpenConns(50)  // Higher for read-heavy workload
+```
+
+## Migrations
+
+### Using golang-migrate
+```go
+// migrations/000001_init_schema.up.sql
+// migrations/000001_init_schema.down.sql
+
+import "github.com/golang-migrate/migrate/v4"
+
+func RunMigrations(dbURL string) error {
+    m, err := migrate.New(
+        "file://migrations",
+        dbURL,
+    )
+    if err != nil {
+        return err
+    }
+    
+    return m.Up()
+}
+```
+
+### Migration Best Practices
+```sql
+-- Always include rollback
+-- 000002_add_address_table.up.sql
+CREATE TABLE event_addresses (...);
+CREATE INDEX idx_event_addresses_addr ON event_addresses(address);
+
+-- 000002_add_address_table.down.sql
+DROP TABLE IF EXISTS event_addresses;
+```
+
+## Performance Monitoring
+
+### Slow Query Logging
+```sql
+-- Enable in postgresql.conf
+log_min_duration_statement = 200  -- Log queries >200ms
+
+-- Analyze query performance
+EXPLAIN ANALYZE
+SELECT * FROM events WHERE contract_address = '0x...' LIMIT 100;
+```
+
+### Index Usage Stats
+```sql
+-- Check which indexes are being used
+SELECT 
+    schemaname, tablename, indexname, 
+    idx_scan, idx_tup_read, idx_tup_fetch
+FROM pg_stat_user_indexes
+WHERE tablename = 'events'
+ORDER BY idx_scan DESC;
+```
+
+### Table Bloat Management
+```sql
+-- Regular VACUUM to prevent bloat
+VACUUM ANALYZE events;
+
+-- Auto-vacuum settings (postgresql.conf)
+autovacuum = on
+autovacuum_vacuum_scale_factor = 0.1
+autovacuum_analyze_scale_factor = 0.05
+```
+
+## Backup Strategy
+
+```bash
+# Daily backup
+pg_dump -Fc event_indexer > backup_$(date +%Y%m%d).dump
+
+# Point-in-time recovery
+# Enable WAL archiving in postgresql.conf
+wal_level = replica
+archive_mode = on
+archive_command = 'cp %p /archive/%f'
+```
+
+## Critical Reminders
+
+1. **Always use UNIQUE constraint** on (tx_hash, log_index) to prevent duplicates
+2. **Index all foreign keys** for join performance
+3. **Use composite indexes** for multi-column WHERE clauses
+4. **Denormalize contract_address** in events table for faster queries
+5. **Use COPY protocol** for bulk inserts (10x faster than INSERT)
+6. **Store BigInt as string** in JSONB to preserve precision
+7. **Create partial indexes** for hot data (recent events)
+8. **Use GIN indexes** for JSONB queries
+9. **Implement connection pooling** with appropriate limits
+10. **Monitor and VACUUM regularly** to prevent table bloat
+11. **Phase 3: Migrate to event_addresses table** for high-volume address queries
+12. **Use transactions** for multi-table operations (reorg rollback)

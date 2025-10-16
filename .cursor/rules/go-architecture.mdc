@@ -1,0 +1,277 @@
+---
+description: Go Microservices Architecture Standards for Event Indexer
+globs: 
+  - "services/**/*.go"
+  - "shared/**/*.go"
+  - "cmd/**/*.go"
+alwaysApply: false
+---
+
+# Smart Contract Event Indexer - Go Architecture Standards
+
+You are an expert Go developer working on a microservices-based blockchain event indexer. Follow these architectural principles and coding standards.
+
+## Project Architecture
+
+This is a **mono-repo with microservices architecture**:
+
+```
+mono-repo/
+├── services/
+│   ├── indexer-service/      # Blockchain event indexing
+│   ├── api-gateway/          # GraphQL/REST API
+│   ├── query-service/        # Query optimization & caching
+│   └── admin-service/        # Management & monitoring
+├── shared/
+│   ├── proto/                # gRPC protocol definitions
+│   ├── models/               # Shared data models
+│   ├── utils/                # Common utilities
+│   └── config/               # Shared configuration
+```
+
+## Service Responsibilities
+
+### indexer-service (Port 8080)
+- Monitor blockchain events via WebSocket
+- Parse event logs using go-ethereum
+- Handle chain reorganizations
+- Write events to PostgreSQL
+- Maintain indexing state
+
+### api-gateway (Port 8000)
+- Expose GraphQL API (gqlgen)
+- Provide REST endpoints (Gin)
+- Handle authentication & rate limiting
+- Route requests to backend services
+
+### query-service (Port 8081)
+- Optimize complex queries
+- Implement Redis caching
+- Provide gRPC endpoints
+- Aggregate event statistics
+
+### admin-service (Port 8082)
+- Manage contract configurations
+- Trigger historical backfills
+- Monitor system health
+- Serve admin UI (React)
+
+## Go Coding Standards
+
+### Package Structure
+```go
+// Use internal/ for private packages
+internal/
+  blockchain/    // Blockchain interaction layer
+  parser/        // Event parsing logic
+  storage/       // Database operations
+  
+// Use pkg/ for public packages
+pkg/
+  models/        // Shared data models
+```
+
+### Error Handling
+```go
+// Always wrap errors with context
+if err != nil {
+    return fmt.Errorf("failed to parse event: %w", err)
+}
+
+// Use custom error types for business logic
+type ValidationError struct {
+    Field string
+    Msg   string
+}
+```
+
+### Context Management
+```go
+// Always pass context.Context as first parameter
+func FetchEvents(ctx context.Context, address common.Address) ([]Event, error)
+
+// Use context for cancellation and timeouts
+ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+defer cancel()
+```
+
+### Goroutine Best Practices
+```go
+// Always use sync.WaitGroup for goroutine coordination
+var wg sync.WaitGroup
+wg.Add(1)
+go func() {
+    defer wg.Done()
+    // work here
+}()
+wg.Wait()
+
+// Use buffered channels to prevent goroutine leaks
+eventCh := make(chan Event, 100)
+```
+
+### Configuration
+```go
+// Use environment variables with defaults
+type Config struct {
+    RPCEndpoint     string `env:"RPC_ENDPOINT" envDefault:"ws://localhost:8545"`
+    DatabaseURL     string `env:"DATABASE_URL,required"`
+    RedisURL        string `env:"REDIS_URL" envDefault:"redis://localhost:6379"`
+    ConfirmBlocks   int    `env:"CONFIRM_BLOCKS" envDefault:"12"`
+}
+```
+
+## Blockchain Integration
+
+### go-ethereum Usage
+```go
+// Use ethclient for WebSocket connections
+client, err := ethclient.Dial("wss://mainnet.infura.io/ws/v3/YOUR_KEY")
+
+// Always handle reconnection
+func (l *Listener) connectWithRetry(ctx context.Context) error {
+    for attempt := 0; attempt < maxRetries; attempt++ {
+        client, err := ethclient.Dial(l.config.RPCEndpoint)
+        if err == nil {
+            l.client = client
+            return nil
+        }
+        time.Sleep(retryDelay * time.Duration(attempt+1))
+    }
+    return fmt.Errorf("max retries exceeded")
+}
+```
+
+### Event Parsing
+```go
+// Parse events using ABI
+parsedABI, err := abi.JSON(strings.NewReader(contractABI))
+event := parsedABI.Events["Transfer"]
+
+// Extract indexed and non-indexed parameters
+var transfer Transfer
+err = parsedABI.UnpackIntoInterface(&transfer, "Transfer", vLog.Data)
+```
+
+### Chain Reorganization Handling
+```go
+// Cache recent blocks to detect reorgs
+type BlockCache struct {
+    mu     sync.RWMutex
+    blocks map[uint64]common.Hash
+}
+
+// On each new block, verify parent hash matches cached value
+if cached, exists := cache.Get(block.Number - 1); exists {
+    if cached != block.ParentHash {
+        // Reorg detected! Rollback and reindex
+        handleReorg(block.Number)
+    }
+}
+```
+
+## Database Patterns
+
+### Batch Inserts
+```go
+// Use COPY protocol for bulk inserts
+stmt, err := tx.Prepare(pq.CopyIn("events", "block_number", "tx_hash", "event_name", "args"))
+for _, event := range events {
+    _, err = stmt.Exec(event.BlockNumber, event.TxHash, event.EventName, event.Args)
+}
+_, err = stmt.Exec() // Flush
+```
+
+### Connection Pooling
+```go
+// Configure connection pool appropriately
+db.SetMaxOpenConns(20)
+db.SetMaxIdleConns(5)
+db.SetConnMaxLifetime(time.Minute * 5)
+```
+
+## Testing Standards
+
+### Unit Tests
+```go
+// Use table-driven tests
+func TestParseEvent(t *testing.T) {
+    tests := []struct {
+        name    string
+        input   types.Log
+        want    Event
+        wantErr bool
+    }{
+        // test cases
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            got, err := ParseEvent(tt.input)
+            // assertions
+        })
+    }
+}
+```
+
+### Mocking
+```go
+// Use interfaces for testability
+type BlockchainClient interface {
+    SubscribeNewHead(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error)
+    FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error)
+}
+
+// Create mock implementations for testing
+type MockClient struct {
+    mock.Mock
+}
+```
+
+## Performance Targets
+
+- **Event Indexing Delay**: <5 seconds (Ethereum mainnet)
+- **API Response Time**: P95 <200ms
+- **Throughput**: 1000+ events/second
+- **Data Accuracy**: 99.99% (with reorg handling)
+
+## Monitoring
+
+### Prometheus Metrics
+```go
+// Expose metrics for monitoring
+var (
+    eventsProcessed = promauto.NewCounter(prometheus.CounterOpts{
+        Name: "events_processed_total",
+        Help: "Total number of events processed",
+    })
+    
+    indexingDelay = promauto.NewGauge(prometheus.GaugeOpts{
+        Name: "indexing_delay_seconds",
+        Help: "Current indexing delay in seconds",
+    })
+)
+```
+
+### Structured Logging
+```go
+// Use structured logging (zerolog/logrus)
+log.Info().
+    Str("contract", address.Hex()).
+    Uint64("block", blockNumber).
+    Int("events", len(events)).
+    Msg("processed events")
+```
+
+## Critical Reminders
+
+1. **Always handle context cancellation** in long-running operations
+2. **Use connection pooling** for database and RPC clients
+3. **Implement exponential backoff** for retries
+4. **Cache frequently accessed data** in Redis
+5. **Batch database operations** for better performance
+6. **Handle chain reorgs** by maintaining block history
+7. **Use prepared statements** to prevent SQL injection
+8. **Implement graceful shutdown** for all services
+9. **Test with local test networks** (Ganache/Hardhat) before mainnet
+10. **Monitor memory usage** in long-running goroutines

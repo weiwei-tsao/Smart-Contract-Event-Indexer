@@ -1,0 +1,744 @@
+---
+description: Docker, Kubernetes deployment and monitoring standards
+globs:
+  - "Dockerfile"
+  - "docker-compose*.yml"
+  - "infrastructure/**/*"
+  - "k8s/**/*.yaml"
+alwaysApply: false
+---
+
+# Docker, Kubernetes & Monitoring Standards
+
+You are containerizing and deploying a production-ready blockchain event indexer. Follow these standards for Docker, Kubernetes, and observability.
+
+## Dockerfile Best Practices
+
+### Multi-Stage Build (Optimized)
+
+```dockerfile
+# Stage 1: Build
+FROM golang:1.21-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git make gcc musl-dev
+
+WORKDIR /app
+
+# Copy go mod files first (better caching)
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build with optimization flags
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-s -w" \
+    -o /app/bin/indexer \
+    ./cmd/indexer
+
+# Stage 2: Runtime
+FROM alpine:3.18
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates tzdata
+
+# Create non-root user
+RUN addgroup -g 1000 app && \
+    adduser -D -u 1000 -G app app
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /app/bin/indexer /app/indexer
+COPY --from=builder /app/migrations /app/migrations
+
+# Set ownership
+RUN chown -R app:app /app
+
+# Switch to non-root user
+USER app
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD ["/app/indexer", "health"]
+
+EXPOSE 8080
+
+ENTRYPOINT ["/app/indexer"]
+CMD ["serve"]
+```
+
+### Service-Specific Dockerfiles
+
+```dockerfile
+# services/indexer-service/Dockerfile
+FROM golang:1.21-alpine AS builder
+WORKDIR /app
+COPY go.* ./
+RUN go mod download
+COPY . .
+RUN go build -o indexer ./cmd/indexer
+
+FROM alpine:3.18
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /app/indexer /indexer
+USER nobody
+ENTRYPOINT ["/indexer"]
+```
+
+## Docker Compose for Development
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: event-indexer-db
+    environment:
+      POSTGRES_USER: indexer
+      POSTGRES_PASSWORD: indexer_pass
+      POSTGRES_DB: event_indexer
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U indexer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: event-indexer-cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  ganache:
+    image: trufflesuite/ganache:latest
+    container_name: test-blockchain
+    ports:
+      - "8545:8545"
+    command: >
+      --deterministic
+      --accounts 10
+      --gasLimit 10000000
+      --networkId 1337
+
+  indexer-service:
+    build:
+      context: .
+      dockerfile: services/indexer-service/Dockerfile
+    container_name: indexer-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://indexer:indexer_pass@postgres:5432/event_indexer?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      RPC_ENDPOINT: ws://ganache:8545
+      CONFIRM_BLOCKS: 12
+      LOG_LEVEL: debug
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    container_name: api-gateway
+    depends_on:
+      - postgres
+      - redis
+      - indexer-service
+    environment:
+      DATABASE_URL: postgres://indexer:indexer_pass@postgres:5432/event_indexer?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      INDEXER_GRPC: indexer-service:8080
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./infrastructure/grafana/datasources:/etc/grafana/provisioning/datasources
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  default:
+    name: event-indexer-network
+```
+
+## Kubernetes Deployment
+
+### Namespace
+```yaml
+# k8s/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: event-indexer
+```
+
+### ConfigMap
+```yaml
+# k8s/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: indexer-config
+  namespace: event-indexer
+data:
+  CONFIRM_BLOCKS: "12"
+  LOG_LEVEL: "info"
+  BATCH_SIZE: "100"
+  # Non-sensitive configuration
+```
+
+### Secrets
+```yaml
+# k8s/secrets.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: indexer-secrets
+  namespace: event-indexer
+type: Opaque
+stringData:
+  DATABASE_URL: "postgres://user:pass@postgres:5432/db"
+  REDIS_URL: "redis://redis:6379"
+  RPC_ENDPOINT: "wss://mainnet.infura.io/ws/v3/YOUR_KEY"
+```
+
+### PostgreSQL StatefulSet
+```yaml
+# k8s/postgres.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: event-indexer
+spec:
+  ports:
+    - port: 5432
+  clusterIP: None
+  selector:
+    app: postgres
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: event-indexer
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_USER
+          value: indexer
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: indexer-secrets
+              key: DB_PASSWORD
+        - name: POSTGRES_DB
+          value: event_indexer
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-storage
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 100Gi
+```
+
+### Indexer Service Deployment
+```yaml
+# k8s/indexer-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: indexer-service
+  namespace: event-indexer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: indexer-service
+  template:
+    metadata:
+      labels:
+        app: indexer-service
+    spec:
+      containers:
+      - name: indexer
+        image: your-registry/indexer-service:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: grpc
+        - containerPort: 9090
+          name: metrics
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: indexer-secrets
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: indexer-secrets
+              key: REDIS_URL
+        - name: RPC_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: indexer-secrets
+              key: RPC_ENDPOINT
+        envFrom:
+        - configMapRef:
+            name: indexer-config
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: indexer-service
+  namespace: event-indexer
+spec:
+  selector:
+    app: indexer-service
+  ports:
+  - name: grpc
+    port: 8080
+    targetPort: 8080
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+```
+
+### API Gateway with Ingress
+```yaml
+# k8s/api-gateway.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: event-indexer
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+      - name: gateway
+        image: your-registry/api-gateway:latest
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: indexer-config
+        - secretRef:
+            name: indexer-secrets
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: event-indexer
+spec:
+  selector:
+    app: api-gateway
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: LoadBalancer
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-ingress
+  namespace: event-indexer
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+spec:
+  tls:
+  - hosts:
+    - api.yourdomain.com
+    secretName: api-tls
+  rules:
+  - host: api.yourdomain.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: api-gateway
+            port:
+              number: 8000
+```
+
+### Horizontal Pod Autoscaler
+```yaml
+# k8s/hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-gateway-hpa
+  namespace: event-indexer
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+```
+
+## Monitoring & Observability
+
+### Prometheus Configuration
+```yaml
+# infrastructure/prometheus/prometheus.yml
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'indexer-service'
+    static_configs:
+      - targets: ['indexer-service:9090']
+    
+  - job_name: 'api-gateway'
+    static_configs:
+      - targets: ['api-gateway:9090']
+    
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+```
+
+### Key Metrics to Expose
+
+```go
+// internal/metrics/metrics.go
+package metrics
+
+import (
+    "github.com/prometheus/client_golang/prometheus"
+    "github.com/prometheus/client_golang/prometheus/promauto"
+)
+
+var (
+    // Indexer metrics
+    EventsProcessed = promauto.NewCounterVec(
+        prometheus.CounterOpts{
+            Name: "events_processed_total",
+            Help: "Total number of events processed",
+        },
+        []string{"contract", "event_name"},
+    )
+    
+    IndexingDelay = promauto.NewGauge(prometheus.GaugeOpts{
+        Name: "indexing_delay_seconds",
+        Help: "Current indexing delay in seconds",
+    })
+    
+    RPCCalls = promauto.NewCounterVec(
+        prometheus.CounterOpts{
+            Name: "rpc_calls_total",
+            Help: "Total RPC calls",
+        },
+        []string{"method", "status"},
+    )
+    
+    // API metrics
+    HTTPRequests = promauto.NewCounterVec(
+        prometheus.CounterOpts{
+            Name: "http_requests_total",
+            Help: "Total HTTP requests",
+        },
+        []string{"method", "endpoint", "status"},
+    )
+    
+    HTTPDuration = promauto.NewHistogramVec(
+        prometheus.HistogramOpts{
+            Name:    "http_request_duration_seconds",
+            Help:    "HTTP request duration",
+            Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5},
+        },
+        []string{"method", "endpoint"},
+    )
+    
+    // Database metrics
+    DBQueries = promauto.NewCounterVec(
+        prometheus.CounterOpts{
+            Name: "db_queries_total",
+            Help: "Total database queries",
+        },
+        []string{"operation", "status"},
+    )
+    
+    DBQueryDuration = promauto.NewHistogramVec(
+        prometheus.HistogramOpts{
+            Name: "db_query_duration_seconds",
+            Help: "Database query duration",
+        },
+        []string{"operation"},
+    )
+)
+```
+
+### Structured Logging
+
+```go
+// Use zerolog for structured logging
+import (
+    "github.com/rs/zerolog"
+    "github.com/rs/zerolog/log"
+)
+
+func main() {
+    // Configure logger
+    zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+    
+    log.Info().
+        Str("service", "indexer").
+        Str("version", version).
+        Msg("starting service")
+}
+
+// In code
+log.Info().
+    Str("contract", address.Hex()).
+    Uint64("block", blockNumber).
+    Int("events", len(events)).
+    Dur("duration", elapsed).
+    Msg("processed events")
+
+log.Error().
+    Err(err).
+    Str("contract", address).
+    Uint64("block", block).
+    Msg("failed to fetch events")
+```
+
+## Health Checks
+
+```go
+// Health check endpoints
+func (s *Server) HealthHandler(w http.ResponseWriter, r *http.Request) {
+    // Simple liveness check
+    w.WriteHeader(http.StatusOK)
+    w.Write([]byte("OK"))
+}
+
+func (s *Server) ReadyHandler(w http.ResponseWriter, r *http.Request) {
+    // Readiness check - verify dependencies
+    ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+    defer cancel()
+    
+    // Check database
+    if err := s.db.PingContext(ctx); err != nil {
+        http.Error(w, "database not ready", http.StatusServiceUnavailable)
+        return
+    }
+    
+    // Check Redis
+    if err := s.redis.Ping(ctx).Err(); err != nil {
+        http.Error(w, "cache not ready", http.StatusServiceUnavailable)
+        return
+    }
+    
+    w.WriteHeader(http.StatusOK)
+    w.Write([]byte("READY"))
+}
+```
+
+## CI/CD Pipeline
+
+```yaml
+# .github/workflows/deploy.yml
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+      - name: Run tests
+        run: go test -v -race ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Login to Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ secrets.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./services/indexer-service/Dockerfile
+          push: true
+          tags: ${{ secrets.REGISTRY }}/indexer-service:${{ github.sha }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl set image deployment/indexer-service \
+            indexer=${{ secrets.REGISTRY }}/indexer-service:${{ github.sha }} \
+            -n event-indexer
+```
+
+## Critical Deployment Reminders
+
+1. **Use multi-stage builds** to minimize image size (<50MB)
+2. **Run as non-root user** for security
+3. **Set resource limits** to prevent resource exhaustion
+4. **Implement health checks** for liveness and readiness
+5. **Use secrets management** (K8s Secrets, AWS Secrets Manager)
+6. **Enable TLS/HTTPS** with cert-manager
+7. **Configure HPA** for automatic scaling
+8. **Expose Prometheus metrics** on /metrics endpoint
+9. **Use structured logging** (JSON format)
+10. **Implement graceful shutdown** (handle SIGTERM)
+11. **Monitor P95/P99 latencies** not just averages
+12. **Set up alerts** for critical conditions (indexing delay, errors)

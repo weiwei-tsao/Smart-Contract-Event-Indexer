@@ -1,0 +1,363 @@
+# Smart Contract Event Indexer - .gitignore
+
+# ===========================================
+# Go specific
+# ===========================================
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+vendor/
+
+# Go workspace file
+go.work
+
+# ===========================================
+# Build artifacts
+# ===========================================
+# Build output
+/build/
+/dist/
+/bin/
+
+# Compiled binaries
+/cmd/*/indexer
+/cmd/*/api-gateway
+/cmd/*/query-service
+/cmd/*/admin-service
+
+# ===========================================
+# Docker
+# ===========================================
+# Docker build context
+.dockerignore
+
+# Docker volumes
+postgres_data/
+redis_data/
+
+# ===========================================
+# Database
+# ===========================================
+# PostgreSQL
+*.sql.backup
+*.dump
+*.sql.gz
+
+# Database dumps
+/dumps/
+/backups/
+
+# ===========================================
+# Configuration & Secrets
+# ===========================================
+# Environment files
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+.env.staging
+
+# Configuration files with secrets
+config/local.yaml
+config/production.yaml
+config/secrets.yaml
+config/*.secret.*
+
+# API Keys and sensitive data
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# ===========================================
+# Logs
+# ===========================================
+# Log files
+*.log
+logs/
+/logs/
+
+# Log rotation
+*.log.*
+*.log.gz
+
+# ===========================================
+# IDE & Editor files
+# ===========================================
+# VSCode
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# GoLand/IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ===========================================
+# OS generated files
+# ===========================================
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ===========================================
+# Blockchain & Web3 specific
+# ===========================================
+# ABI files (if they contain sensitive data)
+# contracts/abi/*.json
+
+# Private keys and wallets
+*.wallet
+*.keystore
+wallets/
+private_keys/
+
+# Ganache/Test blockchain data
+ganache_data/
+test_chain_data/
+
+# ===========================================
+# Monitoring & Observability
+# ===========================================
+# Prometheus data
+prometheus_data/
+/prometheus/
+
+# Grafana data
+grafana_data/
+/grafana/
+
+# Metrics and monitoring
+metrics/
+monitoring/
+
+# ===========================================
+# Testing
+# ===========================================
+# Test coverage
+coverage.out
+coverage.html
+coverage.xml
+
+# Test databases
+test.db
+test_*.db
+
+# Test containers
+/testcontainers/
+
+# ===========================================
+# Generated code
+# ===========================================
+# GraphQL generated code
+/graphql/generated/
+/graphql/models/
+
+# gRPC generated code
+/proto/generated/
+/proto/*.pb.go
+
+# Protocol buffer generated files
+*.pb.go
+*.pb.gw.go
+
+# ===========================================
+# Temporary files
+# ===========================================
+# Temporary files
+tmp/
+temp/
+/tmp/
+/temp/
+
+# Cache directories
+.cache/
+cache/
+
+# ===========================================
+# Documentation build
+# ===========================================
+# Generated documentation
+/docs/build/
+/docs/_build/
+/docs/site/
+
+# ===========================================
+# Deployment & Infrastructure
+# ===========================================
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Kubernetes secrets
+k8s/secrets/
+k8s/*-secret.yaml
+
+# Helm
+charts/*/charts/
+charts/*/Chart.lock
+
+# ===========================================
+# Development tools
+# ===========================================
+# Air (live reload)
+.air.toml
+
+# Delve debugger
+__debug_bin
+
+# Go mod download cache
+/go/pkg/mod/
+
+# ===========================================
+# Project specific
+# ===========================================
+# Local development data
+/local_data/
+/dev_data/
+
+# Indexer state files
+indexer_state.json
+last_block.json
+
+# Event cache files
+event_cache/
+block_cache/
+
+# Performance profiling
+*.prof
+*.pprof
+cpu.prof
+mem.prof
+
+# Benchmark results
+benchmark_results/
+*.bench
+
+# ===========================================
+# Cloud & CI/CD
+# ===========================================
+# AWS
+.aws/
+
+# Google Cloud
+.gcloud/
+
+# Azure
+.azure/
+
+# CI/CD
+.github/workflows/secrets/
+.gitlab-ci-local/
+
+# ===========================================
+# Backup files
+# ===========================================
+# Backup files
+*.bak
+*.backup
+*.old
+*.orig
+
+# ===========================================
+# Package managers
+# ===========================================
+# Node.js (if using any JS tools)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python (if using any Python tools)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ===========================================
+# Keep important files
+# ===========================================
+# Keep example configs
+!config/*.example.*
+!config/*.sample.*
+
+# Keep documentation
+!docs/
+!README.md
+!CHANGELOG.md
+!LICENSE
+
+# Keep Docker files
+!Dockerfile*
+!docker-compose*.yml
+!.dockerignore
+
+# Keep CI/CD configs
+!.github/
+!.gitlab-ci.yml
+
+# Keep example ABI files
+!contracts/abi/*.example.json
