@@ -36,11 +36,25 @@
 
 构建一个高性能、可扩展的区块链事件索引系统，实时监听智能合约事件，提供快速查询服务。
 
+**项目定位**: 🎯 **Portfolio/技能展示项目 + 免费优先部署**
+
 **核心价值主张:**
-- 🚀 **性能**: 索引延迟 <5秒，API 响应 P95 <200ms
+- 🚀 **性能**: 索引延迟 ~72秒 (平衡模式)，API 响应 P95 <200ms
 - 🔒 **可靠**: 99.9% 可用性，自动处理链重组
 - 📊 **灵活**: GraphQL 支持复杂查询，支持多种聚合分析
 - 🔧 **可维护**: 微服务架构，独立部署和扩展
+- 💰 **经济**: **$0-5/月部署成本** (充分利用免费服务)
+
+**Portfolio 部署目标成本**: **$0-5/月**
+```yaml
+成本明细:
+  - Hosting: Railway.app $5/月 (或使用 $5 免费额度 = $0)
+  - Database: Supabase PostgreSQL 免费层 (500MB)
+  - Cache: Upstash Redis 免费层 (10K cmd/day)
+  - RPC: Alchemy 免费层 (300M CU/月)
+  - Monitoring: BetterUptime 免费层
+  - 总计: $0-5/月 ✅
+```
 
 ### 1.2 用户场景
 
@@ -944,11 +958,12 @@ type Mutation {
   ): BackfillPayload!
 }
 
-# 订阅 (可选)
-type Subscription {
-  # 新事件订阅
-  newEvents(contractAddress: Address): Event!
-}
+# 订阅 (Future Enhancement - Phase 6+)
+# WebSocket subscriptions for real-time event notifications
+# type Subscription {
+#   # 新事件订阅
+#   newEvents(contractAddress: Address): Event!
+# }
 ```
 
 ### 6.2 REST API
@@ -1502,10 +1517,13 @@ RPC 节点
 
 ### 9.4 推荐部署策略
 
-#### 🎯 Portfolio 展示项目（推荐）
+#### 🎯 **Portfolio 展示项目（默认推荐）** ⭐
+
+**定位**: 技能展示 + 最小成本  
+**适用**: 面试展示、技术 Portfolio、个人项目
 
 ```yaml
-选择: Railway.app ($5/月) + 外部免费服务
+选择: Railway.app ($0-5/月) + 外部免费服务
 
 部署清单:
   ✅ Railway Services:
@@ -1574,14 +1592,19 @@ RPC 节点
 
 ### 9.5 各方案对比
 
-| 平台 | 月成本 | 部署难度 | 适用场景 | 限制 |
-|------|--------|----------|----------|------|
-| **Railway** | $5 | ⭐⭐ | Portfolio | 免费额度有限 |
-| **Render** | $0-7 | ⭐ | Demo | Free tier 会 sleep |
-| **Oracle Cloud** | $0 | ⭐⭐⭐⭐ | 长期运行 | 需要运维经验 |
-| **Fly.io** | $0-10 | ⭐⭐⭐ | 小规模生产 | 配置复杂 |
-| **混合方案** | $5 | ⭐⭐⭐ | 最优成本 | 管理多平台 |
-| **AWS/GCP** | $50+ | ⭐⭐⭐⭐⭐ | 企业级 | 成本高 |
+| 平台 | 月成本 | 部署难度 | 适用场景 | 推荐度 |
+|------|--------|----------|----------|--------|
+| **Railway** ⭐ | **$0-5** | ⭐⭐ | **Portfolio 首选** | ⭐⭐⭐⭐⭐ |
+| **Oracle Cloud** | **$0** | ⭐⭐⭐⭐ | 长期免费运行 | ⭐⭐⭐⭐ |
+| **混合方案** | **$5** | ⭐⭐⭐ | 最优成本 | ⭐⭐⭐⭐ |
+| **Render** | $0-7 | ⭐ | 简单 Demo | ⭐⭐⭐ |
+| **Fly.io** | $0-10 | ⭐⭐⭐ | 小规模生产 | ⭐⭐⭐ |
+| **AWS/GCP** | $50+ | ⭐⭐⭐⭐⭐ | 企业生产 | ⭐⭐ (成本高) |
+
+**Portfolio 项目推荐顺序**:
+1. 🥇 **Railway.app** - 最简单，5分钟部署，适合快速展示
+2. 🥈 **Oracle Cloud Free** - 完全免费，但需要一定运维经验
+3. 🥉 **混合方案** - 分散风险，利用多平台免费额度
 
 ---
 
