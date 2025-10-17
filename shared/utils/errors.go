@@ -32,6 +32,10 @@ const (
 	ErrCodeDatabaseConnection ErrorCode = "DATABASE_CONNECTION_ERROR"
 	ErrCodeDatabaseQuery      ErrorCode = "DATABASE_QUERY_ERROR"
 
+	// Redis errors
+	ErrCodeRedisConnection ErrorCode = "REDIS_CONNECTION_ERROR"
+	ErrCodeRedisOperation  ErrorCode = "REDIS_OPERATION_ERROR"
+
 	// RPC errors
 	ErrCodeRPC           ErrorCode = "RPC_ERROR"
 	ErrCodeRPCConnection ErrorCode = "RPC_CONNECTION_ERROR"
