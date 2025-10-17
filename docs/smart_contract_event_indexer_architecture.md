@@ -350,13 +350,19 @@ indexer:
   
   # 索引配置
   batch_size: 100
-  confirm_blocks: 12
+  default_confirm_blocks: 6  # 默认使用平衡模式（6块）
   poll_interval: 6s
   max_concurrent_contracts: 5
   
   # 缓冲区配置
   event_buffer_size: 10000
   block_cache_size: 100
+  
+  # 确认策略预设（可在合约级别覆盖）
+  confirmation_presets:
+    realtime: 1   # 实时模式
+    balanced: 6   # 平衡模式（推荐）
+    safe: 12      # 安全模式
 ```
 
 **Metrics 指标:**
@@ -676,6 +682,7 @@ message Event {
 │ abi (JSONB)                      │
 │ start_block                      │
 │ current_block                    │
+│ confirm_blocks (默认6)           │
 │ is_active                        │
 │ created_at                       │
 │ updated_at                       │
@@ -718,8 +725,7 @@ message Event {
 ┌──────────────────────────────────┐
 │      indexer_state                │
 ├──────────────────────────────────┤
-│ id (PK)                          │
-│ contract_id (FK)                 │
+│ contract_id (PK, FK)             │
 │ last_indexed_block               │
 │ last_indexed_at                  │
 │ is_syncing                       │
@@ -1119,23 +1125,45 @@ MVP 阶段使用 GIN 索引，必要时引入专用地址表。
 
 ---
 
-### ADR-004: 12 个确认块而非实时索引
+### ADR-004: 可配置确认块策略
 
 **背景:**
-需要在速度和数据准确性间平衡。
+需要在速度和数据准确性间平衡。不同应用场景对延迟和安全性的要求不同。
 
 **决策:**
-等待 12 个确认块后才认为数据最终确定。
+实现可配置的确认块策略，允许每个合约选择不同的确认级别。
+
+**三种预设策略:**
+
+| 策略 | 确认块数 | 延迟 | 准确率 | 适用场景 |
+|------|---------|------|--------|---------|
+| **实时模式** | 1 块 | ~12 秒 | ~99% | Demo、游戏、实时通知 |
+| **平衡模式** (默认) | 6 块 | ~72 秒 | ~99.99% | 大多数生产应用 |
+| **安全模式** | 12 块 | ~144 秒 | ~99.9999% | 金融、支付、审计 |
+
+**实现细节:**
+```go
+type Contract struct {
+    ConfirmBlocks int32 // 1, 6, or 12
+}
+
+// 索引器在检查时
+if currentBlock - eventBlock >= contract.ConfirmBlocks {
+    // 认为事件已确认，可以索引
+}
+```
 
 **理由:**
-1. **Reorg 风险**: Ethereum 12块后 reorg 概率极低
-2. **数据准确性**: 避免频繁回滚
-3. **用户体验**: 5秒延迟可接受
+1. **灵活性**: 不同应用有不同需求
+2. **风险控制**: 用户明确选择速度vs安全的权衡
+3. **最佳实践**: 参考 Alchemy/Infura 等主流服务
+4. **可观测性**: 可监控不同策略的实际表现
 
 **权衡:**
-- ✅ 99.99% 数据准确性
-- ⚠️ ~2 分钟延迟（12 * 12秒）
-- 🔧 可配置为更激进的策略（如 6 块）
+- ✅ 满足不同场景需求
+- ✅ 默认6块是最佳平衡点
+- ⚠️ 增加配置复杂度（通过合理默认值缓解）
+- ⚠️ 需要文档说明权衡
 
 **状态:** ✅ Accepted
 

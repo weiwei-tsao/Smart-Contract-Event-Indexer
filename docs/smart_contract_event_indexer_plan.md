@@ -146,6 +146,10 @@ rpc:
   - Address checksum 转换
   - Bytes 转 Hex
   - Tuple 类型展开
+- [ ] **实现确认块检查逻辑**
+  - 读取合约的 confirm_blocks 配置
+  - 检查事件是否达到确认要求
+  - 支持合约级别的不同策略
 
 **测试用例:**
 - ERC20 Transfer Event
@@ -232,9 +236,15 @@ UPDATE contracts SET current_block = $fork_block;
 ```yaml
 indexer:
   batch_size: 100
-  confirm_blocks: 12
+  default_confirm_blocks: 6  # 默认平衡模式（可在合约级别覆盖）
   poll_interval: 6s
   max_concurrent_contracts: 5
+  
+  # 确认策略预设
+  confirmation_presets:
+    realtime: 1   # 实时模式: ~12秒延迟
+    balanced: 6   # 平衡模式: ~72秒延迟（推荐）
+    safe: 12      # 安全模式: ~144秒延迟
 ```
 
 **交付物:**
@@ -922,12 +932,12 @@ stages:
 
 | 指标 | 目标 | 测量方式 |
 |------|------|----------|
-| **索引延迟** | <5秒 | Prometheus metrics |
+| **索引延迟** | 平衡模式: ~72秒, 实时模式: ~12秒, 安全模式: ~144秒 | Prometheus metrics |
 | **API 响应时间** | P95 <200ms | k6 压测 |
 | **缓存命中率** | >70% | Redis metrics |
 | **测试覆盖率** | >75% | go test -cover |
 | **系统可用性** | >99% | Uptime monitoring |
-| **数据准确率** | 99.99% | 与链上数据对比 |
+| **数据准确率** | 99.99% (6块确认), 99.9999% (12块确认) | 与链上数据对比 |
 
 ---
 
@@ -941,9 +951,9 @@ stages:
 - **预算**: $50-100/月
 
 **2. Chain Reorg 数据丢失**
-- **缓解**: 等待 12 个确认块
-- **测试**: 在 Ganache 模拟 Reorg 场景
-- **监控**: Reorg 检测告警
+- **缓解**: 可配置确认策略（默认6块平衡模式，可选1块实时或12块安全）
+- **测试**: 在 Ganache 模拟 Reorg 场景，测试所有确认策略
+- **监控**: Reorg 检测告警 + 按确认策略分组的延迟监控
 
 **3. 数据库性能瓶颈**
 - **缓解**: 批量插入 + 索引优化 + 连接池

@@ -19,14 +19,24 @@
 - Web3数据产品（需要可靠的数据源）
 
 ### 1.3 成功指标
-- 事件索引延迟 < 5秒（依赖RPC稳定性，见风险缓解）
+
+**性能指标（可配置确认策略）**：
+
+| 模式 | 确认块数 | 索引延迟 | 数据准确率 | 适用场景 |
+|------|---------|---------|-----------|---------|
+| **实时模式** | 1 块 | < 15秒 | ~99% | Demo、非关键应用 |
+| **平衡模式** (推荐) | 6 块 | < 90秒 | ~99.99% | 大多数生产应用 |
+| **安全模式** | 12 块 | < 150秒 | ~99.9999% | 金融、审计系统 |
+
+**其他指标**：
 - API响应时间 < 200ms (P95)
 - 支持处理 1000+ events/second
-- 数据准确率 99.99%（处理chain reorg）
+- 系统可用性 99.9%
 
-**关于延迟指标的说明**：
-- Ethereum Mainnet: <5秒是可实现的（12秒出块）
-- L2/高吞吐链: 可能需要调整为 <10秒
+**关于确认策略的说明**：
+- **默认使用平衡模式（6块确认）**：在速度和安全间取得最佳平衡
+- Ethereum Mainnet: 6块 ≈ 72秒（在可接受范围内）
+- 允许每个合约配置不同的确认策略
 - 关键依赖：RPC节点质量（优先使用专用节点而非公共端点）
 
 ---
@@ -128,6 +138,7 @@ mutation AddContract {
     address: "0x..."
     abi: "..."
     startBlock: 12345
+    confirmBlocks: 6  # 可选，默认6块（平衡模式）
   ) {
     success
     contractId
@@ -255,9 +266,13 @@ CREATE TABLE contracts (
     abi JSONB NOT NULL,
     start_block BIGINT NOT NULL,
     current_block BIGINT NOT NULL DEFAULT 0,
+    confirm_blocks INTEGER NOT NULL DEFAULT 6, -- 确认块数：1(实时), 6(平衡), 12(安全)
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+    updated_at TIMESTAMP DEFAULT NOW(),
+    
+    -- 约束：确认块数必须在合理范围内
+    CONSTRAINT valid_confirm_blocks CHECK (confirm_blocks >= 1 AND confirm_blocks <= 64)
 );
 
 -- 事件数据主表
@@ -303,8 +318,7 @@ CREATE INDEX idx_event_addresses_event ON event_addresses(event_id);
 
 -- 索引状态追踪
 CREATE TABLE indexer_state (
-    id SERIAL PRIMARY KEY,
-    contract_id INTEGER REFERENCES contracts(id),
+    contract_id INTEGER PRIMARY KEY REFERENCES contracts(id),
     last_indexed_block BIGINT NOT NULL,
     last_indexed_at TIMESTAMP DEFAULT NOW(),
     is_syncing BOOLEAN DEFAULT false,
@@ -333,15 +347,16 @@ type Event struct {
 
 // Contract represents a monitored smart contract
 type Contract struct {
-    ID           int32
-    Address      string
-    Name         string
-    ABI          json.RawMessage
-    StartBlock   int64
-    CurrentBlock int64
-    IsActive     bool
-    CreatedAt    time.Time
-    UpdatedAt    time.Time
+    ID            int32
+    Address       string
+    Name          string
+    ABI           json.RawMessage
+    StartBlock    int64
+    CurrentBlock  int64
+    ConfirmBlocks int32           // 确认块数：1(实时), 6(平衡), 12(安全)
+    IsActive      bool
+    CreatedAt     time.Time
+    UpdatedAt     time.Time
 }
 ```
 
@@ -416,36 +431,41 @@ type ContractStats {
 - [ ] 项目初始化（Go modules, 目录结构）
 - [ ] 连接Ethereum节点（go-ethereum）+ RPC fallback机制 🔴
 - [ ] 实现基础事件监听器
-- [ ] PostgreSQL数据模型设计与实现（GIN索引方案）
+- [ ] **实现可配置确认块策略**（默认6块，支持1/6/12块）
+- [ ] PostgreSQL数据模型设计与实现（GIN索引方案 + confirm_blocks字段）
 - [ ] 简单的REST API（查询events）
 - [ ] Docker Compose开发环境
 - [ ] **关键**：实现Mutation幂等性 + Chain reorg基础处理
 
 **交付物**：可以监听一个合约并通过API查询事件
 **重点**：RPC稳定性 > 功能完整性
+**性能目标**：平衡模式（6块，~72秒延迟）
 
 ### Phase 2: 核心功能完善 (Week 3)
 - [ ] 实现GraphQL API（gqlgen）
 - [ ] 添加pagination支持
-- [ ] 完善chain reorg处理逻辑（12块确认）🔴
+- [ ] 完善chain reorg处理逻辑（支持所有确认策略：1/6/12块）🔴
 - [ ] 添加Redis缓存层
-- [ ] 配置管理系统（添加/删除合约，带幂等性）
+- [ ] 配置管理系统（添加/删除合约，支持设置确认块数，带幂等性）
 - [ ] 基础监控（Prometheus metrics）
 
 **交付物**：生产级的索引服务（核心功能）
-**性能目标**：延迟 <10秒（MVP可接受），P95 < 300ms
+**性能目标**：默认使用平衡模式（6块，~90秒），P95 < 300ms
 
 ### Phase 3: 性能优化 (Week 4)
 - [ ] **评估并实现** `event_addresses` 表（如果查询P95 > 500ms）
 - [ ] 历史数据回填功能
 - [ ] 批处理优化（动态batch size）
-- [ ] 完整监控和告警（Grafana dashboards）
+- [ ] 完整监控和告警（Grafana dashboards，包括确认策略监控）
 - [ ] 管理后台UI（可选）
-- [ ] 单元测试与集成测试（覆盖率 > 75%）
+- [ ] 单元测试与集成测试（覆盖率 > 75%，测试所有确认策略）
 - [ ] 压力测试（k6）
 
 **交付物**：生产就绪系统
-**性能目标**：延迟 <5秒，P95 < 200ms
+**性能目标**：
+- 平衡模式（6块）: ~72秒延迟，P95 < 200ms
+- 实时模式（1块）: ~12秒延迟（用于Demo）
+- 安全模式（12块）: ~144秒延迟（用于金融应用）
 
 ### Phase 4: 部署与文档 (Week 5)
 - [ ] AWS/Cloud部署配置
@@ -468,7 +488,13 @@ type ContractStats {
 ## 7. 性能要求与优化策略
 
 ### 7.1 性能目标
-- 事件索引延迟: < 5秒（从区块确认到数据可查询）
+
+**索引延迟（取决于确认策略）**：
+- **实时模式** (1块): < 15秒
+- **平衡模式** (6块): < 90秒 ← 默认
+- **安全模式** (12块): < 150秒
+
+**API性能**：
 - API响应时间: P50 < 50ms, P95 < 200ms
 - 吞吐量: 支持 1000+ events/second
 - 可用性: 99.9% uptime
@@ -505,7 +531,7 @@ type ContractStats {
 | 风险 | 影响 | 优先级 | 缓解方案 |
 |------|------|--------|----------|
 | RPC节点限流/不稳定 | 索引延迟增加，可能掉数据 | 🔴 P0 | **最高优先级**：使用付费专用RPC + 多节点fallback + 智能重试 |
-| Chain reorg处理不当 | 数据不一致，用户看到错误数据 | 🔴 P0 | 等待12个确认块（Ethereum）+ 实现reorg检测和回滚逻辑 |
+| Chain reorg处理不当 | 数据不一致，用户看到错误数据 | 🔴 P0 | **可配置确认策略**：默认6块（平衡），可选1块（快速）或12块（安全）+ 实现reorg检测和回滚逻辑 |
 | `eventsByAddress` 性能瓶颈 | 查询变慢，用户体验差 | 🟡 P1 | MVP使用GIN索引，Phase 3引入专用地址表 |
 | 数据库性能瓶颈 | 写入变慢，索引延迟增加 | 🟡 P1 | 批量插入 + 连接池优化 + 分表策略（后期） |
 | 内存占用过高 | 服务OOM崩溃 | 🟢 P2 | 限制批处理大小 + 事件缓冲区上限 + 定期GC |
