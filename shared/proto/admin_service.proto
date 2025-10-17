@@ -1,0 +1,122 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "github.com/smart-contract-event-indexer/shared/proto;proto";
+
+import "google/protobuf/timestamp.proto";
+
+// AdminService provides contract management operations
+service AdminService {
+  // AddContract adds a new contract to monitor
+  rpc AddContract(AddContractRequest) returns (AddContractResponse);
+  
+  // RemoveContract removes a contract from monitoring
+  rpc RemoveContract(RemoveContractRequest) returns (RemoveContractResponse);
+  
+  // GetContract retrieves contract information
+  rpc GetContract(GetContractRequest) returns (Contract);
+  
+  // ListContracts lists all monitored contracts
+  rpc ListContracts(ListContractsRequest) returns (ListContractsResponse);
+  
+  // TriggerBackfill triggers historical data backfill
+  rpc TriggerBackfill(BackfillRequest) returns (BackfillResponse);
+  
+  // GetBackfillStatus retrieves backfill job status
+  rpc GetBackfillStatus(BackfillStatusRequest) returns (BackfillJob);
+}
+
+// AddContractRequest represents a request to add a contract
+message AddContractRequest {
+  string address = 1;
+  string abi = 2;
+  string name = 3;
+  int64 start_block = 4;
+  optional int32 confirm_blocks = 5;
+}
+
+// AddContractResponse represents the response from adding a contract
+message AddContractResponse {
+  bool success = 1;
+  Contract contract = 2;
+  bool is_new = 3;
+  string message = 4;
+}
+
+// RemoveContractRequest represents a request to remove a contract
+message RemoveContractRequest {
+  string address = 1;
+}
+
+// RemoveContractResponse represents the response from removing a contract
+message RemoveContractResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// GetContractRequest represents a request to get contract info
+message GetContractRequest {
+  string address = 1;
+}
+
+// ListContractsRequest represents a request to list contracts
+message ListContractsRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+
+// ListContractsResponse contains a list of contracts
+message ListContractsResponse {
+  repeated Contract contracts = 1;
+  int32 total_count = 2;
+}
+
+// Contract represents a monitored smart contract
+message Contract {
+  int64 id = 1;
+  string address = 2;
+  string abi = 3;
+  string name = 4;
+  int64 start_block = 5;
+  int64 current_block = 6;
+  int32 confirm_blocks = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+// BackfillRequest represents a request to trigger backfill
+message BackfillRequest {
+  string contract_address = 1;
+  int64 from_block = 2;
+  int64 to_block = 3;
+}
+
+// BackfillResponse represents the response from triggering backfill
+message BackfillResponse {
+  bool success = 1;
+  string job_id = 2;
+  int64 estimated_time = 3; // in seconds
+  string message = 4;
+}
+
+// BackfillStatusRequest represents a request for backfill status
+message BackfillStatusRequest {
+  string job_id = 1;
+}
+
+// BackfillJob represents a backfill job
+message BackfillJob {
+  string id = 1;
+  string contract_address = 2;
+  int64 from_block = 3;
+  int64 to_block = 4;
+  int64 current_block = 5;
+  string status = 6;
+  optional string error_message = 7;
+  double progress = 8; // percentage
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+  optional google.protobuf.Timestamp completed_at = 11;
+}
+
