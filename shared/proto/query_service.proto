@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "github.com/smart-contract-event-indexer/shared/proto;proto";
+
+import "google/protobuf/timestamp.proto";
+
+// QueryService provides event query operations
+service QueryService {
+  // GetEvents retrieves events based on filter criteria
+  rpc GetEvents(EventQuery) returns (EventResponse);
+  
+  // GetEventsByAddress retrieves events involving a specific address
+  rpc GetEventsByAddress(AddressQuery) returns (EventResponse);
+  
+  // GetEventsByTransaction retrieves events for a specific transaction
+  rpc GetEventsByTransaction(TransactionQuery) returns (EventResponse);
+  
+  // GetContractStats retrieves statistics for a contract
+  rpc GetContractStats(StatsQuery) returns (StatsResponse);
+}
+
+// EventQuery represents a query for events
+message EventQuery {
+  optional string contract_address = 1;
+  optional string event_name = 2;
+  optional int64 from_block = 3;
+  optional int64 to_block = 4;
+  int32 limit = 5;
+  int32 offset = 6;
+}
+
+// AddressQuery represents a query for events by address
+message AddressQuery {
+  string address = 1;
+  optional string contract_address = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+}
+
+// TransactionQuery represents a query for events by transaction
+message TransactionQuery {
+  string transaction_hash = 1;
+}
+
+// StatsQuery represents a query for contract statistics
+message StatsQuery {
+  string contract_address = 1;
+}
+
+// EventResponse contains a list of events
+message EventResponse {
+  repeated Event events = 1;
+  int32 total_count = 2;
+}
+
+// Event represents a blockchain event
+message Event {
+  int64 id = 1;
+  string contract_address = 2;
+  string event_name = 3;
+  int64 block_number = 4;
+  string block_hash = 5;
+  string transaction_hash = 6;
+  int32 transaction_index = 7;
+  int32 log_index = 8;
+  string args = 9; // JSON string
+  google.protobuf.Timestamp timestamp = 10;
+}
+
+// StatsResponse contains contract statistics
+message StatsResponse {
+  string contract_address = 1;
+  int64 total_events = 2;
+  int64 latest_block = 3;
+  int64 current_block = 4;
+  int64 indexer_delay = 5;
+  google.protobuf.Timestamp last_updated = 6;
+}
+
