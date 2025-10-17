@@ -16,7 +16,7 @@ import (
 type Client struct {
 	endpoint string
 	client   *ethclient.Client
-	logger   *utils.Logger
+	logger   utils.Logger
 }
 
 // NewClient creates a new blockchain client

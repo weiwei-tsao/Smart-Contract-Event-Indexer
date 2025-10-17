@@ -17,7 +17,7 @@ type Handler struct {
 	eventStorage    *storage.EventStorage
 	stateStorage    *storage.StateStorage
 	detector        *Detector
-	logger          *utils.Logger
+	logger          utils.Logger
 }
 
 // NewHandler creates a new reorg handler

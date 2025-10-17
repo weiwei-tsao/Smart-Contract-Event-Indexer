@@ -15,7 +15,7 @@ type ABIParser struct {
 	contractABI abi.ABI
 	eventsByID  map[string]abi.Event // Map of event ID (topic0) to event
 	eventsByName map[string]abi.Event // Map of event name to event
-	logger      *utils.Logger
+	logger      utils.Logger
 }
 
 // NewABIParser creates a new ABI parser

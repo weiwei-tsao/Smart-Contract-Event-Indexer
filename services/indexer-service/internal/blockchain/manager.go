@@ -17,7 +17,7 @@ type RPCManager struct {
 	fallbackClients []*Client
 	currentClient   *Client
 	mu              sync.RWMutex
-	logger          *utils.Logger
+	logger          utils.Logger
 	
 	// Health check settings
 	healthCheckInterval time.Duration
@@ -96,9 +96,14 @@ func (m *RPCManager) GetCurrentClient() *Client {
 
 // GetLatestBlockNumber returns the latest block number with fallback
 func (m *RPCManager) GetLatestBlockNumber(ctx context.Context) (int64, error) {
-	return m.executeWithFallback(ctx, func(client *Client) (int64, error) {
-		return client.GetLatestBlockNumber(ctx)
+	result, err := m.executeWithFallback(ctx, func(client *Client) (interface{}, error) {
+		blockNum, err := client.GetLatestBlockNumber(ctx)
+		return blockNum, err
 	})
+	if err != nil {
+		return 0, err
+	}
+	return result.(int64), nil
 }
 
 // GetLogs retrieves logs with fallback support

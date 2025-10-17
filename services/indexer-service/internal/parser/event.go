@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -17,7 +16,7 @@ import (
 // EventParser parses blockchain logs into structured events
 type EventParser struct {
 	abiParser *ABIParser
-	logger    *utils.Logger
+	logger    utils.Logger
 }
 
 // NewEventParser creates a new event parser
@@ -53,6 +52,12 @@ func (p *EventParser) ParseLog(log types.Log, blockTimestamp time.Time) (*models
 		return nil, fmt.Errorf("failed to marshal args to JSON: %w", err)
 	}
 	
+	// Unmarshal into JSONB map
+	var argsMap models.JSONB
+	if err := json.Unmarshal(argsJSON, &argsMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal args to JSONB: %w", err)
+	}
+	
 	// Create the Event model
 	parsedEvent := &models.Event{
 		ContractAddress:  models.Address(log.Address.Hex()),
@@ -62,7 +67,7 @@ func (p *EventParser) ParseLog(log types.Log, blockTimestamp time.Time) (*models
 		TransactionHash:  models.Hash(log.TxHash.Hex()),
 		TransactionIndex: int(log.TxIndex),
 		LogIndex:         int(log.Index),
-		Args:             models.JSONB(argsJSON),
+		Args:             argsMap,
 		Timestamp:        blockTimestamp,
 	}
 	

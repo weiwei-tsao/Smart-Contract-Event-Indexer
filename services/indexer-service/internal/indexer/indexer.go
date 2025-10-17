@@ -22,7 +22,7 @@ type Indexer struct {
 	stateStorage    *storage.StateStorage
 	pollInterval    time.Duration
 	batchSize       int
-	logger          *utils.Logger
+	logger          utils.Logger
 	
 	// Contract-specific parsers
 	parsersMu sync.RWMutex

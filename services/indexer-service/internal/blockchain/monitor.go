@@ -12,7 +12,7 @@ import (
 type BlockMonitor struct {
 	client       *Client
 	pollInterval time.Duration
-	logger       *utils.Logger
+	logger       utils.Logger
 	lastBlock    int64
 }
 

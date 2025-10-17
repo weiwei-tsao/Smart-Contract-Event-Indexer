@@ -13,7 +13,7 @@ import (
 // LifecycleManager manages the lifecycle of the indexer
 type LifecycleManager struct {
 	indexer         *Indexer
-	logger          *utils.Logger
+	logger          utils.Logger
 	shutdownTimeout time.Duration
 	
 	// State tracking

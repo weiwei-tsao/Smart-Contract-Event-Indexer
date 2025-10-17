@@ -20,7 +20,7 @@ const (
 // Detector detects blockchain reorganizations
 type Detector struct {
 	redisClient *redis.Client
-	logger      *utils.Logger
+	logger      utils.Logger
 	cacheSize   int
 }
 

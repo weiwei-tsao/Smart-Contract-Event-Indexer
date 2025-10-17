@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -116,8 +117,9 @@ func (c *ErrorClassifier) IsRetriable(err error) bool {
 func (c *ErrorClassifier) GetRetryDelay(attempt int, errType ErrorType) time.Duration {
 	baseDelay := c.policy.InitialDelay
 	
-	// Apply exponential backoff
-	delay := time.Duration(float64(baseDelay) * (1 << uint(attempt-1)))
+	// Apply exponential backoff (2^(attempt-1))
+	multiplier := math.Pow(2, float64(attempt-1))
+	delay := time.Duration(float64(baseDelay) * multiplier)
 	
 	// Apply backoff factor
 	delay = time.Duration(float64(delay) * c.policy.BackoffFactor)
@@ -229,7 +231,7 @@ type CircuitBreaker struct {
 	failures       int
 	lastFailure    time.Time
 	state          CircuitState
-	logger         *utils.Logger
+	logger         utils.Logger
 	mu             sync.RWMutex
 }
 

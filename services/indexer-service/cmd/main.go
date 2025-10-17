@@ -16,7 +16,6 @@ import (
 	"github.com/smart-contract-event-indexer/indexer-service/internal/config"
 	"github.com/smart-contract-event-indexer/indexer-service/internal/indexer"
 	"github.com/smart-contract-event-indexer/indexer-service/internal/storage"
-	"github.com/smart-contract-event-indexer/shared/database"
 	"github.com/smart-contract-event-indexer/shared/utils"
 )
 
@@ -35,7 +34,7 @@ func main() {
 	}
 	
 	// Initialize logger
-	logger := utils.NewLogger(cfg.LogLevel, cfg.LogFormat)
+	logger := utils.NewLogger("indexer-service", cfg.LogLevel, cfg.LogFormat)
 	logger.Info("Starting Indexer Service")
 	logger.WithFields(map[string]interface{}{
 		"rpc_endpoint":   cfg.RPCEndpoint,
@@ -49,11 +48,16 @@ func main() {
 	defer cancel()
 	
 	// Initialize database connection
-	db, err := database.NewPostgresConnection(cfg.DatabaseURL)
+	db, err := sqlx.Connect("postgres", cfg.DatabaseURL)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to connect to database")
 	}
 	defer db.Close()
+	
+	// Configure connection pool
+	db.SetMaxOpenConns(20)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
 	
 	logger.Info("Database connection established")
 	
