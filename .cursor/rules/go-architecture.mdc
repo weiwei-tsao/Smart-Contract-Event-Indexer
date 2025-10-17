@@ -29,6 +29,21 @@ mono-repo/
 │   └── config/               # Shared configuration
 ```
 
+## Project Positioning
+
+**Type**: 🎯 **Portfolio/技能展示项目**
+
+**Key Principles**:
+- Prioritize free tier deployment ($0-5/month)
+- Use configurable confirmation blocks per contract
+- Optimize for RPC call reduction (batch processing)
+- Design for production upgrade path
+
+**Default Configuration**:
+- Confirmation blocks: 6 (balanced mode)
+- Deployment: Railway.app + Supabase + Upstash
+- RPC: Alchemy free tier (300M CU/month)
+
 ## Service Responsibilities
 
 ### indexer-service (Port 8080)
@@ -114,11 +129,22 @@ eventCh := make(chan Event, 100)
 ```go
 // Use environment variables with defaults
 type Config struct {
-    RPCEndpoint     string `env:"RPC_ENDPOINT" envDefault:"ws://localhost:8545"`
-    DatabaseURL     string `env:"DATABASE_URL,required"`
-    RedisURL        string `env:"REDIS_URL" envDefault:"redis://localhost:6379"`
-    ConfirmBlocks   int    `env:"CONFIRM_BLOCKS" envDefault:"12"`
+    RPCEndpoint           string `env:"RPC_ENDPOINT" envDefault:"ws://localhost:8545"`
+    DatabaseURL           string `env:"DATABASE_URL,required"`
+    RedisURL              string `env:"REDIS_URL" envDefault:"redis://localhost:6379"`
+    DefaultConfirmBlocks  int    `env:"DEFAULT_CONFIRM_BLOCKS" envDefault:"6"`  // 1=realtime, 6=balanced, 12=safe
+    
+    // Free tier settings (Portfolio deployment)
+    BatchSize             int    `env:"BATCH_SIZE" envDefault:"100"`
+    PollInterval          int    `env:"POLL_INTERVAL_SECONDS" envDefault:"6"`
 }
+
+// Confirmation strategies
+const (
+    ConfirmRealtimeBlocks = 1   // ~12s delay, 99% accuracy
+    ConfirmBalancedBlocks = 6   // ~72s delay, 99.99% accuracy (default)
+    ConfirmSafeBlocks     = 12  // ~144s delay, 99.9999% accuracy
+)
 ```
 
 ## Blockchain Integration
@@ -155,10 +181,17 @@ err = parsedABI.UnpackIntoInterface(&transfer, "Transfer", vLog.Data)
 
 ### Chain Reorganization Handling
 ```go
-// Cache recent blocks to detect reorgs
+// Cache recent 100 blocks to detect reorgs
 type BlockCache struct {
-    mu     sync.RWMutex
-    blocks map[uint64]common.Hash
+    mu       sync.RWMutex
+    blocks   map[uint64]common.Hash
+    maxSize  int  // Default: 100 blocks
+}
+
+// Check if event has required confirmations
+func (i *Indexer) isConfirmed(eventBlock uint64, currentBlock uint64, contract *Contract) bool {
+    confirmations := currentBlock - eventBlock
+    return confirmations >= uint64(contract.ConfirmBlocks)
 }
 
 // On each new block, verify parent hash matches cached value
@@ -168,6 +201,9 @@ if cached, exists := cache.Get(block.Number - 1); exists {
         handleReorg(block.Number)
     }
 }
+
+// Store block for reorg detection
+cache.Set(block.Number, block.Hash())
 ```
 
 ## Database Patterns
@@ -230,10 +266,22 @@ type MockClient struct {
 
 ## Performance Targets
 
-- **Event Indexing Delay**: <5 seconds (Ethereum mainnet)
+### Portfolio Deployment (Default - Balanced Mode)
+- **Event Indexing Delay**: ~72 seconds (6 block confirmations)
 - **API Response Time**: P95 <200ms
 - **Throughput**: 1000+ events/second
-- **Data Accuracy**: 99.99% (with reorg handling)
+- **Data Accuracy**: 99.99% (6 block confirmations)
+
+### Alternative Modes
+- **Realtime Mode** (1 block): ~12s delay, 99% accuracy - for demos
+- **Safe Mode** (12 blocks): ~144s delay, 99.9999% accuracy - for financial apps
+
+### Deployment Cost
+- **Portfolio/Free Tier**: $0-5/month
+  - Alchemy RPC: Free (300M CU/month)
+  - Supabase PostgreSQL: Free (500MB)
+  - Upstash Redis: Free (10K cmd/day)
+  - Railway hosting: $5/month or free credits
 
 ## Monitoring
 
@@ -265,13 +313,17 @@ log.Info().
 
 ## Critical Reminders
 
-1. **Always handle context cancellation** in long-running operations
-2. **Use connection pooling** for database and RPC clients
-3. **Implement exponential backoff** for retries
-4. **Cache frequently accessed data** in Redis
-5. **Batch database operations** for better performance
-6. **Handle chain reorgs** by maintaining block history
-7. **Use prepared statements** to prevent SQL injection
-8. **Implement graceful shutdown** for all services
-9. **Test with local test networks** (Ganache/Hardhat) before mainnet
-10. **Monitor memory usage** in long-running goroutines
+1. **Use configurable confirmation blocks** - Read from contract.ConfirmBlocks field (default: 6)
+2. **Always handle context cancellation** in long-running operations
+3. **Use connection pooling** for database and RPC clients
+4. **Implement exponential backoff** for retries
+5. **Batch RPC calls** to reduce API usage (critical for free tier: 99% reduction possible)
+6. **Cache frequently accessed data** in Redis
+7. **Batch database operations** for better performance (use COPY protocol)
+8. **Handle chain reorgs** by maintaining 100-block history
+9. **Use prepared statements** to prevent SQL injection
+10. **Implement graceful shutdown** for all services
+11. **Test with local test networks** (Ganache/Hardhat) before mainnet
+12. **Monitor RPC usage** to stay within free tier limits (300M CU/month for Alchemy)
+13. **Convert big.Int to string** before storing in JSONB (preserves precision)
+14. **Check confirmations before indexing** - currentBlock - eventBlock >= contract.ConfirmBlocks

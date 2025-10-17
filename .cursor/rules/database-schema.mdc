@@ -21,15 +21,19 @@ CREATE TABLE contracts (
     abi TEXT NOT NULL,
     start_block BIGINT NOT NULL,
     current_block BIGINT NOT NULL DEFAULT 0,
+    confirm_blocks INTEGER NOT NULL DEFAULT 6,  -- Configurable: 1(realtime), 6(balanced), 12(safe)
+    is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     
     -- Indexes
-    CONSTRAINT address_format CHECK (address ~* '^0x[a-f0-9]{40}$')
+    CONSTRAINT address_format CHECK (address ~* '^0x[a-f0-9]{40}$'),
+    CONSTRAINT valid_confirm_blocks CHECK (confirm_blocks >= 1 AND confirm_blocks <= 64)
 );
 
 CREATE INDEX idx_contracts_address ON contracts(address);
 CREATE INDEX idx_contracts_current_block ON contracts(current_block);
+CREATE INDEX idx_contracts_active ON contracts(is_active) WHERE is_active = true;
 ```
 
 ### Events Table (Core Data Store)
@@ -114,10 +118,11 @@ CREATE TABLE block_cache (
     CONSTRAINT block_hash_format CHECK (block_hash ~* '^0x[a-f0-9]{64}$')
 );
 
--- Auto-cleanup old blocks (keep only recent 50)
+-- Auto-cleanup old blocks (keep only recent 100)
 CREATE INDEX idx_block_cache_number_desc ON block_cache(block_number DESC);
 
--- TTL: Delete blocks older than 50 blocks (via cron job)
+-- TTL: Delete blocks older than 100 blocks (via cron job or Redis)
+-- 100 blocks provides sufficient depth for deep reorg detection
 ```
 
 ## Query Patterns & Optimization
