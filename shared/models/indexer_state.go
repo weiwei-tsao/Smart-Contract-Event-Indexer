@@ -6,9 +6,16 @@ import (
 
 // IndexerState represents the current state of the indexer for a contract
 type IndexerState struct {
-	ContractAddress  Address   `db:"contract_address" json:"contractAddress"`
-	LastIndexedBlock int64     `db:"last_indexed_block" json:"lastIndexedBlock"`
-	UpdatedAt        time.Time `db:"updated_at" json:"updatedAt"`
+	ID               int64      `db:"id" json:"id"`
+	ContractAddress  Address    `db:"contract_address" json:"contractAddress"`
+	LastIndexedBlock int64      `db:"last_indexed_block" json:"lastIndexedBlock"`
+	LastBlockHash    Hash       `db:"last_block_hash" json:"lastBlockHash"`
+	LastProcessedAt  time.Time  `db:"last_processed_at" json:"lastProcessedAt"`
+	Status           string     `db:"status" json:"status"` // active, paused, stopped, reorg_recovery
+	ErrorCount       int        `db:"error_count" json:"errorCount"`
+	LastError        *string    `db:"last_error" json:"lastError,omitempty"`
+	CreatedAt        time.Time  `db:"created_at" json:"createdAt"`
+	UpdatedAt        time.Time  `db:"updated_at" json:"updatedAt"`
 }
 
 // BlockCache represents cached block information for reorg detection

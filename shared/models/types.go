@@ -38,8 +38,16 @@ func (a Address) Normalize() Address {
 
 // Validate checks if the hash is valid
 func (h Hash) Validate() error {
-	if !common.IsHexHash(string(h)) {
-		return fmt.Errorf("invalid ethereum hash: %s", h)
+	str := string(h)
+	if len(str) == 0 {
+		return fmt.Errorf("invalid ethereum hash: empty string")
+	}
+	// Check if it's a valid hex string (with or without 0x prefix)
+	if len(str) < 2 || (str[:2] != "0x" && str[:2] != "0X") {
+		return fmt.Errorf("invalid ethereum hash: %s (must start with 0x)", h)
+	}
+	if len(str) != 66 { // 0x + 64 hex characters
+		return fmt.Errorf("invalid ethereum hash: %s (must be 66 characters)", h)
 	}
 	return nil
 }
@@ -94,17 +102,17 @@ func Now() Timestamp {
 type ConfirmationStrategy string
 
 const (
-	ConfirmationRealtime ConfirmationStrategy = "realtime" // 1 block
-	ConfirmationBalanced ConfirmationStrategy = "balanced" // 6 blocks (default)
-	ConfirmationSafe     ConfirmationStrategy = "safe"     // 12 blocks
+	StrategyRealtime ConfirmationStrategy = "realtime" // 1 block
+	StrategyBalanced ConfirmationStrategy = "balanced" // 6 blocks (default)
+	StrategySafe     ConfirmationStrategy = "safe"     // 12 blocks
 )
 
 // ToBlocks returns the number of blocks for the strategy
 func (cs ConfirmationStrategy) ToBlocks() int {
 	switch cs {
-	case ConfirmationRealtime:
+	case StrategyRealtime:
 		return 1
-	case ConfirmationSafe:
+	case StrategySafe:
 		return 12
 	default:
 		return 6 // balanced

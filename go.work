@@ -1,10 +1,9 @@
 go 1.21
 
 use (
-	./shared
-	./services/indexer-service
-	./services/api-gateway
-	./services/query-service
 	./services/admin-service
+	./services/api-gateway
+	./services/indexer-service
+	./services/query-service
+	./shared
 )
-

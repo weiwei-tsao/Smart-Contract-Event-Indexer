@@ -52,7 +52,7 @@ services:
       --gasLimit 12000000
       --gasPrice 20000000000
       --networkId 1337
-      --chainId 1337
+      --chain.chainId 1337
       --host 0.0.0.0
       --port 8545
     healthcheck:

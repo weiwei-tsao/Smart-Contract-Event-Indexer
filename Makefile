@@ -79,7 +79,15 @@ test-unit: ## Run unit tests only
 
 test-integration: ## Run integration tests
 	@echo "$(BLUE)Running integration tests...$(NC)"
-	@go test -v -run Integration ./...
+	@cd services/indexer-service && go test -v ./tests/integration/... -timeout 5m
+
+test-integration-full: ## Run full integration test suite with Docker setup
+	@echo "$(BLUE)Running full integration test suite...$(NC)"
+	@./tests/integration/run_tests.sh
+
+test-integration-simple: ## Run simple integration tests (no Docker setup)
+	@echo "$(BLUE)Running simple integration tests...$(NC)"
+	@cd services/indexer-service && go test -v ./tests/integration/... -run TestIndexer_ServiceStartup -timeout 2m
 
 # Code Quality
 lint: ## Run linter
