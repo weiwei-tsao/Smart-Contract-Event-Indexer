@@ -372,6 +372,8 @@ kubectl logs -f deployment/indexer-service -n event-indexer
 
 ### Project Documentation
 
+- [Progress Dashboard](docs/PROGRESS.md) - Current project status and metrics
+- [Changelog](CHANGELOG.md) - Detailed change history
 - [Architecture Overview](docs/smart_contract_event_indexer_architecture.md)
 - [Product Requirements](docs/smart_contract_event_indexer_prd.md)
 - [Implementation Plan](docs/smart_contract_event_indexer_plan.md)
@@ -379,9 +381,19 @@ kubectl logs -f deployment/indexer-service -n event-indexer
 
 ### Development Logs
 
-- [Feature Logs](docs/development/features/)
-- [Bug Fixes](docs/development/bugs/)
-- [Debug Sessions](docs/development/debug-sessions/)
+- [Feature Logs](docs/development/features/) - Detailed implementation logs
+  - [Phase 2 Indexer Service](docs/development/features/001-phase-2-indexer-service.md)
+  - [Testing Strategy](docs/development/features/002-testing-strategy.md)
+  - [Integration Testing](docs/development/features/003-integration-testing.md)
+  - [Unit Testing](docs/development/features/004-unit-testing.md)
+- [Bug Fixes](docs/development/bugs/) - Bug resolution documentation
+- [Debug Sessions](docs/development/debug-sessions/) - Complex debugging sessions
+
+### Architecture Documentation
+
+- [System Architecture](docs/architecture/diagrams/system-architecture.md) - High-level system design
+- [Architecture Decisions](docs/architecture/decisions/) - ADRs for major decisions
+  - [Why Microservices](docs/architecture/decisions/001-why-microservices.md)
 
 ### API Documentation
 
@@ -420,7 +432,7 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 ### Roadmap
 
 - [x] **Phase 1**: Infrastructure setup (Week 1) ✅
-- [ ] **Phase 2**: Indexer Service core (Week 1-2)
+- [x] **Phase 2**: Indexer Service core (Week 1-2) ✅
 - [ ] **Phase 3**: API layer (Week 2-3)
 - [ ] **Phase 4**: Testing & optimization (Week 4)
 - [ ] **Phase 5**: Deployment & documentation (Week 5)
