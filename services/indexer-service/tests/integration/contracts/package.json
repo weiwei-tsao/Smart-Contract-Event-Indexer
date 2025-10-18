@@ -1,0 +1,12 @@
+{
+  "name": "test-contracts",
+  "version": "1.0.0",
+  "description": "Test contracts for integration testing",
+  "main": "compile.js",
+  "scripts": {
+    "compile": "node compile.js"
+  },
+  "dependencies": {
+    "solc": "^0.8.19"
+  }
+}
