@@ -1,0 +1,191 @@
+# GraphQL Schema for Smart Contract Event Indexer
+
+# Custom Scalars
+scalar DateTime
+scalar BigInt
+scalar Address
+
+# Core Types
+type Event {
+  id: ID!
+  contractAddress: Address!
+  eventName: String!
+  blockNumber: BigInt!
+  blockTimestamp: DateTime!
+  transactionHash: String!
+  transactionIndex: Int!
+  logIndex: Int!
+  args: [EventArg!]!
+  rawLog: String
+  createdAt: DateTime!
+}
+
+type EventArg {
+  key: String!
+  value: String!
+  type: String!
+}
+
+type Contract {
+  id: ID!
+  address: Address!
+  name: String
+  abi: String!
+  startBlock: BigInt!
+  currentBlock: BigInt!
+  confirmBlocks: Int!
+  isActive: Boolean!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type ContractStats {
+  totalEvents: Int!
+  latestBlock: BigInt!
+  indexerDelay: Int! # seconds behind chain head
+  uniqueAddresses: Int # count of unique addresses in events
+  lastIndexedAt: DateTime
+}
+
+# Relay-style Pagination
+type EventConnection {
+  edges: [EventEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type EventEdge {
+  node: Event!
+  cursor: String!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+  endCursor: String
+}
+
+# Input Types
+input EventFilter {
+  contractAddress: Address
+  eventName: String
+  fromBlock: BigInt
+  toBlock: BigInt
+  addresses: [Address!] # events involving these addresses
+  transactionHash: String
+}
+
+input PaginationInput {
+  first: Int
+  after: String
+  last: Int
+  before: String
+}
+
+input AddContractInput {
+  address: Address!
+  name: String
+  abi: String!
+  startBlock: BigInt!
+  confirmBlocks: Int # optional, defaults to 6
+}
+
+input BackfillInput {
+  contractAddress: Address!
+  fromBlock: BigInt!
+  toBlock: BigInt!
+  chunkSize: Int # optional, defaults to 1000
+}
+
+# Response Types
+type AddContractPayload {
+  success: Boolean!
+  contractId: ID
+  isNew: Boolean!
+  message: String!
+}
+
+type RemoveContractPayload {
+  success: Boolean!
+  message: String!
+}
+
+type BackfillPayload {
+  success: Boolean!
+  jobId: ID
+  estimatedTime: Int # seconds
+  message: String!
+}
+
+# Queries
+type Query {
+  # Main event query with filtering and pagination
+  events(
+    filter: EventFilter
+    pagination: PaginationInput
+  ): EventConnection!
+  
+  # Get events by transaction hash
+  eventsByTransaction(txHash: String!): [Event!]!
+  
+  # Get events involving a specific address
+  eventsByAddress(
+    address: Address!
+    pagination: PaginationInput
+  ): EventConnection!
+  
+  # Contract information
+  contract(address: Address!): Contract
+  contracts(isActive: Boolean): [Contract!]!
+  
+  # Statistics
+  contractStats(address: Address!): ContractStats!
+  
+  # System status
+  systemStatus: SystemStatus!
+}
+
+# Mutations
+type Mutation {
+  # Add a new contract to monitor (idempotent)
+  addContract(input: AddContractInput!): AddContractPayload!
+  
+  # Remove a contract from monitoring
+  removeContract(address: Address!): RemoveContractPayload!
+  
+  # Trigger historical data backfill
+  triggerBackfill(input: BackfillInput!): BackfillPayload!
+  
+  # Update contract configuration
+  updateContract(
+    address: Address!
+    confirmBlocks: Int
+    isActive: Boolean
+  ): AddContractPayload!
+}
+
+# System Status
+type SystemStatus {
+  indexerLag: Int! # seconds behind chain
+  totalContracts: Int!
+  totalEvents: Int!
+  cacheHitRate: Float!
+  lastIndexedBlock: BigInt
+  isHealthy: Boolean!
+  uptime: Int! # seconds
+}
+
+# Health Check
+type HealthCheck {
+  status: String!
+  timestamp: DateTime!
+  services: [ServiceStatus!]!
+}
+
+type ServiceStatus {
+  name: String!
+  status: String!
+  latency: Int # milliseconds
+  lastCheck: DateTime!
+}
