@@ -38,6 +38,66 @@ mono-repo/
 
 ---
 
+## 🔄 Git 工作流和提交策略
+
+### 核心原则
+
+**原子化提交**: 每个子任务完成后立即提交，保持提交历史的清晰和可审查性。
+
+**提交格式**: 遵循 Conventional Commits 规范
+```bash
+type(scope): description
+
+详细描述:
+- 具体变更内容
+- 影响范围
+- 依赖关系
+
+Resolves: Phase X Task Y - 任务描述
+```
+
+### 阶段开发模式
+
+每个阶段包含多个子任务，每个子任务完成后独立提交：
+
+```
+Phase 3: API Layer Development
+├── Task 1: GraphQL Schema Design
+│   ├── feat(graphql): design complete GraphQL schema with custom scalars
+│   └── feat(graphql): configure gqlgen code generation
+├── Task 2: gRPC Service Definitions  
+│   ├── feat(grpc): define QueryService proto interface
+│   └── feat(grpc): define AdminService proto interface
+├── Task 3: Query Service Implementation
+│   ├── feat(query-service): implement gRPC server with interceptors
+│   ├── feat(query-service): add Redis caching layer
+│   ├── feat(query-service): build SQL query optimizer
+│   └── feat(query-service): add Prometheus metrics
+└── Task 4: API Gateway Implementation
+    ├── feat(api-gateway): implement REST API endpoints
+    ├── feat(api-gateway): add middleware for CORS and logging
+    └── feat(api-gateway): implement health check endpoints
+```
+
+### 分支策略
+
+- **功能分支**: `feature/phase-X-description`
+- **修复分支**: `fix/description`
+- **文档分支**: `docs/description`
+
+### 提交检查清单
+
+提交前必须检查：
+- [ ] 运行测试: `make test`
+- [ ] 运行代码检查: `make lint`
+- [ ] 检查变更: `git diff --cached`
+- [ ] 确认提交信息清晰准确
+- [ ] 确认包含必要的测试
+
+详细的工作流指南请参考: [Git Workflow Documentation](../development/GIT_WORKFLOW.md)
+
+---
+
 ## 🎯 Phase 1: 项目基础设施搭建 (Week 1, Day 1-3)
 
 ### 1.1 Mono-repo 初始化
