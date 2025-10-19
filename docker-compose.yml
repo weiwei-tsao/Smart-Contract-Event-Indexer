@@ -94,6 +94,102 @@ services:
     profiles:
       - tools
 
+  # Indexer Service
+  indexer-service:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.indexer
+    container_name: event-indexer-service
+    environment:
+      - DATABASE_URL=postgres://indexer:indexer_password@postgres:5432/event_indexer?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+      - RPC_URL=http://ganache:8545
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ganache:
+        condition: service_healthy
+    networks:
+      - indexer-network
+    restart: unless-stopped
+
+  # Query Service
+  query-service:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.query-service
+    container_name: event-indexer-query-service
+    ports:
+      - "8081:8081"
+    environment:
+      - DATABASE_URL=postgres://indexer:indexer_password@postgres:5432/event_indexer?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+      - QUERY_SERVICE_PORT=8081
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - indexer-network
+    restart: unless-stopped
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.api-gateway
+    container_name: event-indexer-api-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://indexer:indexer_password@postgres:5432/event_indexer?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+      - QUERY_SERVICE_ADDR=query-service:8081
+      - ADMIN_SERVICE_ADDR=admin-service:8082
+      - API_GATEWAY_PORT=8000
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      query-service:
+        condition: service_started
+    networks:
+      - indexer-network
+    restart: unless-stopped
+
+  # Admin Service
+  admin-service:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.admin-service
+    container_name: event-indexer-admin-service
+    ports:
+      - "8082:8082"
+    environment:
+      - DATABASE_URL=postgres://indexer:indexer_password@postgres:5432/event_indexer?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+      - ADMIN_SERVICE_PORT=8082
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - indexer-network
+    restart: unless-stopped
+
 networks:
   indexer-network:
     driver: bridge

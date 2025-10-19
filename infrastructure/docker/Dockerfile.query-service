@@ -8,18 +8,18 @@ RUN apk add --no-cache git ca-certificates tzdata
 WORKDIR /app
 
 # Copy go mod files
-COPY services/api-gateway/go.mod services/api-gateway/go.sum ./
+COPY services/query-service/go.mod services/query-service/go.sum ./
 COPY shared/go.mod shared/go.sum ./shared/
 
 # Download dependencies
 RUN go mod download
 
 # Copy source code
-COPY services/api-gateway/ ./
+COPY services/query-service/ ./
 COPY shared/ ./shared/
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o api-gateway ./cmd/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o query-service ./cmd/main.go
 
 # Final stage
 FROM alpine:latest
@@ -34,7 +34,7 @@ RUN adduser -D -s /bin/sh appuser
 WORKDIR /app
 
 # Copy binary from builder stage
-COPY --from=builder /app/api-gateway .
+COPY --from=builder /app/query-service .
 
 # Change ownership to appuser
 RUN chown -R appuser:appuser /app
@@ -43,11 +43,11 @@ RUN chown -R appuser:appuser /app
 USER appuser
 
 # Expose port
-EXPOSE 8000
+EXPOSE 8081
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8000/api/v1/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8081/health || exit 1
 
 # Run the application
-CMD ["./api-gateway"]
+CMD ["./query-service"]
