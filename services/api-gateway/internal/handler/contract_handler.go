@@ -47,19 +47,12 @@ type AddContractRequest struct {
 
 // GetContracts handles GET /api/v1/contracts
 func (h *ContractHandler) GetContracts(c *gin.Context) {
-	query := "SELECT id, address, name, abi, start_block, current_block, confirm_blocks, is_active, created_at, updated_at FROM contracts"
+	query := "SELECT id, address, name, abi, start_block, current_block, confirm_blocks, created_at, updated_at FROM contracts"
 	args := []interface{}{}
 	argIndex := 1
 
-	// Add filter for active contracts if specified
-	isActiveStr := c.Query("is_active")
-	if isActiveStr != "" {
-		if isActive, err := strconv.ParseBool(isActiveStr); err == nil {
-			query += " WHERE is_active = $" + strconv.Itoa(argIndex)
-			args = append(args, isActive)
-			argIndex++
-		}
-	}
+	// Note: is_active column doesn't exist in current schema
+	// Filtering by active status is not available in current implementation
 
 	query += " ORDER BY created_at DESC"
 
@@ -83,6 +76,9 @@ func (h *ContractHandler) GetContracts(c *gin.Context) {
 
 	query += " LIMIT $" + strconv.Itoa(argIndex) + " OFFSET $" + strconv.Itoa(argIndex+1)
 	args = append(args, limit, offset)
+
+	// Debug logging
+	h.logger.Info("Executing query", "query", query, "args", args)
 
 	rows, err := h.db.Query(query, args...)
 	if err != nil {
@@ -225,7 +221,7 @@ func (h *ContractHandler) GetContract(c *gin.Context) {
 	}
 
 	query := `
-		SELECT id, address, name, abi, start_block, current_block, confirm_blocks, is_active, created_at, updated_at
+		SELECT id, address, name, abi, start_block, current_block, confirm_blocks, created_at, updated_at
 		FROM contracts 
 		WHERE address = $1
 	`
@@ -266,9 +262,9 @@ func (h *ContractHandler) RemoveContract(c *gin.Context) {
 		return
 	}
 
-	// Mark contract as inactive instead of deleting
-	query := "UPDATE contracts SET is_active = false, updated_at = $1 WHERE address = $2"
-	result, err := h.db.Exec(query, models.Now(), address)
+	// Delete contract (no is_active column in current schema)
+	query := "DELETE FROM contracts WHERE address = $1"
+	result, err := h.db.Exec(query, address)
 	if err != nil {
 		h.logger.Error("Failed to remove contract", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove contract"})

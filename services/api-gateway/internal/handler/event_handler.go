@@ -47,7 +47,7 @@ func (h *EventHandler) GetEvents(c *gin.Context) {
 	offsetStr := c.Query("offset")
 
 	// Build query
-	query := "SELECT id, contract_id, contract_address, event_name, block_number, block_timestamp, transaction_hash, transaction_index, log_index, args, raw_log, created_at FROM events WHERE 1=1"
+	query := "SELECT id, contract_address, event_name, block_number, block_hash, transaction_hash, transaction_index, log_index, args, timestamp, created_at FROM events WHERE 1=1"
 	args := []interface{}{}
 	argIndex := 1
 
@@ -184,8 +184,8 @@ func (h *EventHandler) GetEventsByTransaction(c *gin.Context) {
 	}
 
 	query := `
-		SELECT id, contract_id, contract_address, event_name, block_number, block_timestamp, 
-		       transaction_hash, transaction_index, log_index, args, raw_log, created_at 
+		SELECT id, contract_address, event_name, block_number, block_hash, 
+		       transaction_hash, transaction_index, log_index, args, timestamp, created_at 
 		FROM events 
 		WHERE transaction_hash = $1 
 		ORDER BY log_index ASC
@@ -247,8 +247,8 @@ func (h *EventHandler) GetEventsByAddress(c *gin.Context) {
 
 	// Use JSONB query to find events involving this address
 	query := `
-		SELECT id, contract_id, contract_address, event_name, block_number, block_timestamp, 
-		       transaction_hash, transaction_index, log_index, args, raw_log, created_at 
+		SELECT id, contract_address, event_name, block_number, block_hash, 
+		       transaction_hash, transaction_index, log_index, args, timestamp, created_at 
 		FROM events 
 		WHERE args @> $1 
 		ORDER BY block_number DESC, log_index ASC
