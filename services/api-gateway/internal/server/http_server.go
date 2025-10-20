@@ -2,10 +2,8 @@ package server
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,21 +11,20 @@ import (
 	"github.com/smart-contract-event-indexer/api-gateway/internal/config"
 	"github.com/smart-contract-event-indexer/api-gateway/internal/handler"
 	"github.com/smart-contract-event-indexer/api-gateway/internal/middleware"
-	"github.com/smart-contract-event-indexer/shared/models"
-	"go.uber.org/zap"
+	"github.com/smart-contract-event-indexer/shared/utils"
 )
 
 // HTTPServer handles HTTP requests
 type HTTPServer struct {
 	server *http.Server
-	logger *zap.Logger
+	logger utils.Logger
 }
 
 // NewHTTPServer creates a new HTTP server
 func NewHTTPServer(
 	db *sql.DB,
 	redisClient *redis.Client,
-	logger *zap.Logger,
+	logger utils.Logger,
 	cfg *config.Config,
 ) *http.Server {
 	// Set Gin mode
