@@ -95,17 +95,15 @@ func (h *ContractHandler) GetContracts(c *gin.Context) {
 	var contracts []models.Contract
 	for rows.Next() {
 		var contract models.Contract
-		var abiJSON string
 
 		err := rows.Scan(
 			&contract.ID,
 			&contract.Address,
 			&contract.Name,
-			&abiJSON,
+			&contract.ABI,
 			&contract.StartBlock,
 			&contract.CurrentBlock,
 			&contract.ConfirmBlocks,
-			&contract.IsActive,
 			&contract.CreatedAt,
 			&contract.UpdatedAt,
 		)
@@ -114,21 +112,12 @@ func (h *ContractHandler) GetContracts(c *gin.Context) {
 			continue
 		}
 
-		// Parse ABI JSON
-		if err := contract.ABI.UnmarshalJSON([]byte(abiJSON)); err != nil {
-			h.logger.Warn("Failed to parse contract ABI", zap.Error(err))
-			contract.ABI = models.JSONB{}
-		}
-
 		contracts = append(contracts, contract)
 	}
 
 	// Get total count
 	countQuery := "SELECT COUNT(*) FROM contracts"
 	countArgs := args[:len(args)-2] // Remove limit and offset
-	if len(countArgs) > 0 {
-		countQuery = "SELECT COUNT(*) FROM contracts WHERE is_active = $1"
-	}
 
 	var totalCount int64
 	if err := h.db.QueryRow(countQuery, countArgs...).Scan(&totalCount); err != nil {
@@ -186,15 +175,15 @@ func (h *ContractHandler) AddContract(c *gin.Context) {
 
 	// Validate ABI JSON
 	var abiJSON models.JSONB
-	if err := abiJSON.UnmarshalJSON([]byte(req.ABI)); err != nil {
+	if err := json.Unmarshal([]byte(req.ABI), &abiJSON); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ABI JSON"})
 		return
 	}
 
 	// Insert new contract
 	insertQuery := `
-		INSERT INTO contracts (address, name, abi, start_block, current_block, confirm_blocks, is_active, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO contracts (address, name, abi, start_block, current_block, confirm_blocks, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id
 	`
 
@@ -207,7 +196,6 @@ func (h *ContractHandler) AddContract(c *gin.Context) {
 		req.StartBlock,
 		req.StartBlock, // current_block starts at start_block
 		req.ConfirmBlocks,
-		true, // is_active
 		models.Now(),
 		models.Now(),
 	).Scan(&contractID)
@@ -243,17 +231,14 @@ func (h *ContractHandler) GetContract(c *gin.Context) {
 	`
 
 	var contract models.Contract
-	var abiJSON string
-
 	err := h.db.QueryRow(query, address).Scan(
 		&contract.ID,
 		&contract.Address,
 		&contract.Name,
-		&abiJSON,
+		&contract.ABI,
 		&contract.StartBlock,
 		&contract.CurrentBlock,
 		&contract.ConfirmBlocks,
-		&contract.IsActive,
 		&contract.CreatedAt,
 		&contract.UpdatedAt,
 	)
@@ -267,11 +252,6 @@ func (h *ContractHandler) GetContract(c *gin.Context) {
 		return
 	}
 
-	// Parse ABI JSON
-	if err := contract.ABI.UnmarshalJSON([]byte(abiJSON)); err != nil {
-		h.logger.Warn("Failed to parse contract ABI", zap.Error(err))
-		contract.ABI = models.JSONB{}
-	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"contract": contract,

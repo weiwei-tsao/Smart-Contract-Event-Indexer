@@ -2,6 +2,7 @@ package handler
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -113,20 +114,18 @@ func (h *EventHandler) GetEvents(c *gin.Context) {
 	for rows.Next() {
 		var event models.Event
 		var argsJSON string
-		var rawLogJSON string
 
 		err := rows.Scan(
 			&event.ID,
-			&event.ContractID,
 			&event.ContractAddress,
 			&event.EventName,
 			&event.BlockNumber,
-			&event.BlockTimestamp,
-			&event.TxHash,
-			&event.TxIndex,
+			&event.BlockHash,
+			&event.TransactionHash,
+			&event.TransactionIndex,
 			&event.LogIndex,
 			&argsJSON,
-			&rawLogJSON,
+			&event.Timestamp,
 			&event.CreatedAt,
 		)
 		if err != nil {
@@ -135,16 +134,9 @@ func (h *EventHandler) GetEvents(c *gin.Context) {
 		}
 
 		// Parse JSONB args
-		if err := event.Args.UnmarshalJSON([]byte(argsJSON)); err != nil {
+		if err := json.Unmarshal([]byte(argsJSON), &event.Args); err != nil {
 			h.logger.Warn("Failed to parse event args", zap.Error(err))
 			event.Args = models.JSONB{}
-		}
-
-		// Parse raw log if present
-		if rawLogJSON != "" {
-			if err := event.RawLog.UnmarshalJSON([]byte(rawLogJSON)); err != nil {
-				h.logger.Warn("Failed to parse raw log", zap.Error(err))
-			}
 		}
 
 		events = append(events, event)
@@ -211,20 +203,18 @@ func (h *EventHandler) GetEventsByTransaction(c *gin.Context) {
 	for rows.Next() {
 		var event models.Event
 		var argsJSON string
-		var rawLogJSON string
 
 		err := rows.Scan(
 			&event.ID,
-			&event.ContractID,
 			&event.ContractAddress,
 			&event.EventName,
 			&event.BlockNumber,
-			&event.BlockTimestamp,
-			&event.TxHash,
-			&event.TxIndex,
+			&event.BlockHash,
+			&event.TransactionHash,
+			&event.TransactionIndex,
 			&event.LogIndex,
 			&argsJSON,
-			&rawLogJSON,
+			&event.Timestamp,
 			&event.CreatedAt,
 		)
 		if err != nil {
@@ -233,7 +223,7 @@ func (h *EventHandler) GetEventsByTransaction(c *gin.Context) {
 		}
 
 		// Parse JSONB args
-		if err := event.Args.UnmarshalJSON([]byte(argsJSON)); err != nil {
+		if err := json.Unmarshal([]byte(argsJSON), &event.Args); err != nil {
 			h.logger.Warn("Failed to parse event args", zap.Error(err))
 			event.Args = models.JSONB{}
 		}
@@ -288,20 +278,18 @@ func (h *EventHandler) GetEventsByAddress(c *gin.Context) {
 	for rows.Next() {
 		var event models.Event
 		var argsJSON string
-		var rawLogJSON string
 
 		err := rows.Scan(
 			&event.ID,
-			&event.ContractID,
 			&event.ContractAddress,
 			&event.EventName,
 			&event.BlockNumber,
-			&event.BlockTimestamp,
-			&event.TxHash,
-			&event.TxIndex,
+			&event.BlockHash,
+			&event.TransactionHash,
+			&event.TransactionIndex,
 			&event.LogIndex,
 			&argsJSON,
-			&rawLogJSON,
+			&event.Timestamp,
 			&event.CreatedAt,
 		)
 		if err != nil {
@@ -310,7 +298,7 @@ func (h *EventHandler) GetEventsByAddress(c *gin.Context) {
 		}
 
 		// Parse JSONB args
-		if err := event.Args.UnmarshalJSON([]byte(argsJSON)); err != nil {
+		if err := json.Unmarshal([]byte(argsJSON), &event.Args); err != nil {
 			h.logger.Warn("Failed to parse event args", zap.Error(err))
 			event.Args = models.JSONB{}
 		}
