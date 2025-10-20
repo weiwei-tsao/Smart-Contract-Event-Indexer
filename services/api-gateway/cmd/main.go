@@ -13,9 +13,9 @@ import (
 
 	"github.com/smart-contract-event-indexer/api-gateway/internal/config"
 	"github.com/smart-contract-event-indexer/api-gateway/internal/server"
+	sharedconfig "github.com/smart-contract-event-indexer/shared/config"
 	"github.com/smart-contract-event-indexer/shared/database"
 	"github.com/smart-contract-event-indexer/shared/utils"
-	"go.uber.org/zap"
 )
 
 func main() {
@@ -29,36 +29,42 @@ func main() {
 	}
 
 	// Initialize logger
-	logger, err := utils.NewLogger(cfg.LogLevel, cfg.LogFormat)
-	if err != nil {
-		log.Fatalf("Failed to create logger: %v", err)
-	}
-	defer logger.Sync()
-
-	logger.Info("Starting API Gateway", zap.String("version", "1.0.0"))
+	logger := utils.NewLogger("api-gateway", cfg.LogLevel, cfg.LogFormat)
+	logger.Info("Starting API Gateway", "version", "1.0.0")
 
 	// Initialize database connection
-	db, err := database.NewConnection(cfg.DatabaseURL)
+	dbConfig := sharedconfig.DatabaseConfig{
+		URL:             cfg.DatabaseURL,
+		MaxOpenConns:    20,
+		MaxIdleConns:    5,
+		ConnMaxLifetime: 5 * time.Minute,
+	}
+	db, err := database.NewDB(dbConfig, logger)
 	if err != nil {
-		logger.Fatal("Failed to connect to database", zap.Error(err))
+		logger.Fatal("Failed to connect to database", "error", err)
 	}
 	defer db.Close()
 
 	// Initialize Redis connection
-	redisClient, err := database.NewRedisClient(cfg.RedisURL)
+	redisConfig := sharedconfig.RedisConfig{
+		URL:      cfg.RedisURL,
+		Password: "",
+		DB:       0,
+	}
+	redisClient, err := database.NewRedisClient(redisConfig, logger)
 	if err != nil {
-		logger.Fatal("Failed to connect to Redis", zap.Error(err))
+		logger.Fatal("Failed to connect to Redis", "error", err)
 	}
 	defer redisClient.Close()
 
 	// Create and start HTTP server
-	httpServer := server.NewHTTPServer(db, redisClient, logger, cfg)
+	httpServer := server.NewHTTPServer(db.DB, redisClient.Client, logger, cfg)
 
 	// Start server in a goroutine
 	go func() {
-		logger.Info("API Gateway started", zap.String("address", fmt.Sprintf(":%d", cfg.Port)))
+		logger.Info("API Gateway started", "address", fmt.Sprintf(":%d", cfg.Port))
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("Failed to start HTTP server", zap.Error(err))
+			logger.Fatal("Failed to start HTTP server", "error", err)
 		}
 	}()
 
@@ -74,7 +80,7 @@ func main() {
 	defer cancel()
 
 	if err := httpServer.Shutdown(ctx); err != nil {
-		logger.Error("Server forced to shutdown", zap.Error(err))
+		logger.Error("Server forced to shutdown", "error", err)
 	}
 
 	logger.Info("API Gateway stopped")
