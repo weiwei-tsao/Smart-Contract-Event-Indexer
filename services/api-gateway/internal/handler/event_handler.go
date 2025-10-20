@@ -10,14 +10,14 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/smart-contract-event-indexer/api-gateway/internal/config"
 	"github.com/smart-contract-event-indexer/shared/models"
-	"go.uber.org/zap"
+	"github.com/smart-contract-event-indexer/shared/utils"
 )
 
 // EventHandler handles event-related HTTP requests
 type EventHandler struct {
 	db          *sql.DB
 	redisClient *redis.Client
-	logger      *zap.Logger
+	logger      utils.Logger
 	config      *config.Config
 }
 
@@ -25,7 +25,7 @@ type EventHandler struct {
 func NewEventHandler(
 	db *sql.DB,
 	redisClient *redis.Client,
-	logger *zap.Logger,
+	logger utils.Logger,
 	cfg *config.Config,
 ) *EventHandler {
 	return &EventHandler{
@@ -103,7 +103,7 @@ func (h *EventHandler) GetEvents(c *gin.Context) {
 	// Execute query
 	rows, err := h.db.Query(query, args...)
 	if err != nil {
-		h.logger.Error("Failed to query events", zap.Error(err))
+		h.logger.Error("Failed to query events", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query events"})
 		return
 	}
@@ -129,13 +129,13 @@ func (h *EventHandler) GetEvents(c *gin.Context) {
 			&event.CreatedAt,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan event", zap.Error(err))
+			h.logger.Error("Failed to scan event", "error", err)
 			continue
 		}
 
 		// Parse JSONB args
 		if err := json.Unmarshal([]byte(argsJSON), &event.Args); err != nil {
-			h.logger.Warn("Failed to parse event args", zap.Error(err))
+			h.logger.Warn("Failed to parse event args", "error", err)
 			event.Args = models.JSONB{}
 		}
 
@@ -162,7 +162,7 @@ func (h *EventHandler) GetEvents(c *gin.Context) {
 
 	var totalCount int64
 	if err := h.db.QueryRow(countQuery, countArgs...).Scan(&totalCount); err != nil {
-		h.logger.Warn("Failed to get total count", zap.Error(err))
+		h.logger.Warn("Failed to get total count", "error", err)
 		totalCount = int64(len(events))
 	}
 
@@ -193,7 +193,7 @@ func (h *EventHandler) GetEventsByTransaction(c *gin.Context) {
 
 	rows, err := h.db.Query(query, txHash)
 	if err != nil {
-		h.logger.Error("Failed to query events by transaction", zap.Error(err))
+		h.logger.Error("Failed to query events by transaction", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query events"})
 		return
 	}
@@ -218,13 +218,13 @@ func (h *EventHandler) GetEventsByTransaction(c *gin.Context) {
 			&event.CreatedAt,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan event", zap.Error(err))
+			h.logger.Error("Failed to scan event", "error", err)
 			continue
 		}
 
 		// Parse JSONB args
 		if err := json.Unmarshal([]byte(argsJSON), &event.Args); err != nil {
-			h.logger.Warn("Failed to parse event args", zap.Error(err))
+			h.logger.Warn("Failed to parse event args", "error", err)
 			event.Args = models.JSONB{}
 		}
 
@@ -268,7 +268,7 @@ func (h *EventHandler) GetEventsByAddress(c *gin.Context) {
 
 	rows, err := h.db.Query(query, addressFilter, limit)
 	if err != nil {
-		h.logger.Error("Failed to query events by address", zap.Error(err))
+		h.logger.Error("Failed to query events by address", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query events"})
 		return
 	}
@@ -293,13 +293,13 @@ func (h *EventHandler) GetEventsByAddress(c *gin.Context) {
 			&event.CreatedAt,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan event", zap.Error(err))
+			h.logger.Error("Failed to scan event", "error", err)
 			continue
 		}
 
 		// Parse JSONB args
 		if err := json.Unmarshal([]byte(argsJSON), &event.Args); err != nil {
-			h.logger.Warn("Failed to parse event args", zap.Error(err))
+			h.logger.Warn("Failed to parse event args", "error", err)
 			event.Args = models.JSONB{}
 		}
 

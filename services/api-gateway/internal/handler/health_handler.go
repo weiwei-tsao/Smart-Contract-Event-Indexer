@@ -8,21 +8,21 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
+	"github.com/smart-contract-event-indexer/shared/utils"
 )
 
 // HealthHandler handles health check requests
 type HealthHandler struct {
 	db          *sql.DB
 	redisClient *redis.Client
-	logger      *zap.Logger
+	logger      utils.Logger
 }
 
 // NewHealthHandler creates a new HealthHandler
 func NewHealthHandler(
 	db *sql.DB,
 	redisClient *redis.Client,
-	logger *zap.Logger,
+	logger utils.Logger,
 ) *HealthHandler {
 	return &HealthHandler{
 		db:          db,

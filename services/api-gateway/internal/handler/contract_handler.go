@@ -10,14 +10,14 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/smart-contract-event-indexer/api-gateway/internal/config"
 	"github.com/smart-contract-event-indexer/shared/models"
-	"go.uber.org/zap"
+	"github.com/smart-contract-event-indexer/shared/utils"
 )
 
 // ContractHandler handles contract-related HTTP requests
 type ContractHandler struct {
 	db          *sql.DB
 	redisClient *redis.Client
-	logger      *zap.Logger
+	logger      utils.Logger
 	config      *config.Config
 }
 
@@ -25,7 +25,7 @@ type ContractHandler struct {
 func NewContractHandler(
 	db *sql.DB,
 	redisClient *redis.Client,
-	logger *zap.Logger,
+	logger utils.Logger,
 	cfg *config.Config,
 ) *ContractHandler {
 	return &ContractHandler{
@@ -86,7 +86,7 @@ func (h *ContractHandler) GetContracts(c *gin.Context) {
 
 	rows, err := h.db.Query(query, args...)
 	if err != nil {
-		h.logger.Error("Failed to query contracts", zap.Error(err))
+		h.logger.Error("Failed to query contracts", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query contracts"})
 		return
 	}
@@ -108,7 +108,7 @@ func (h *ContractHandler) GetContracts(c *gin.Context) {
 			&contract.UpdatedAt,
 		)
 		if err != nil {
-			h.logger.Error("Failed to scan contract", zap.Error(err))
+			h.logger.Error("Failed to scan contract", "error", err)
 			continue
 		}
 
@@ -121,7 +121,7 @@ func (h *ContractHandler) GetContracts(c *gin.Context) {
 
 	var totalCount int64
 	if err := h.db.QueryRow(countQuery, countArgs...).Scan(&totalCount); err != nil {
-		h.logger.Warn("Failed to get total count", zap.Error(err))
+		h.logger.Warn("Failed to get total count", "error", err)
 		totalCount = int64(len(contracts))
 	}
 
@@ -168,7 +168,7 @@ func (h *ContractHandler) AddContract(c *gin.Context) {
 		})
 		return
 	} else if err != sql.ErrNoRows {
-		h.logger.Error("Failed to check existing contract", zap.Error(err))
+		h.logger.Error("Failed to check existing contract", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check existing contract"})
 		return
 	}
@@ -201,12 +201,12 @@ func (h *ContractHandler) AddContract(c *gin.Context) {
 	).Scan(&contractID)
 
 	if err != nil {
-		h.logger.Error("Failed to insert contract", zap.Error(err))
+		h.logger.Error("Failed to insert contract", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create contract"})
 		return
 	}
 
-	h.logger.Info("Contract added", zap.String("address", req.Address), zap.Int32("id", contractID))
+	h.logger.Info("Contract added", "address", req.Address, "id", contractID)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"success":     true,
@@ -247,7 +247,7 @@ func (h *ContractHandler) GetContract(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Contract not found"})
 		return
 	} else if err != nil {
-		h.logger.Error("Failed to query contract", zap.Error(err))
+		h.logger.Error("Failed to query contract", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query contract"})
 		return
 	}
@@ -270,14 +270,14 @@ func (h *ContractHandler) RemoveContract(c *gin.Context) {
 	query := "UPDATE contracts SET is_active = false, updated_at = $1 WHERE address = $2"
 	result, err := h.db.Exec(query, models.Now(), address)
 	if err != nil {
-		h.logger.Error("Failed to remove contract", zap.Error(err))
+		h.logger.Error("Failed to remove contract", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove contract"})
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		h.logger.Error("Failed to get rows affected", zap.Error(err))
+		h.logger.Error("Failed to get rows affected", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove contract"})
 		return
 	}
@@ -287,7 +287,7 @@ func (h *ContractHandler) RemoveContract(c *gin.Context) {
 		return
 	}
 
-	h.logger.Info("Contract removed", zap.String("address", address))
+	h.logger.Info("Contract removed", "address", address)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -307,7 +307,7 @@ func (h *ContractHandler) GetContractStats(c *gin.Context) {
 	var totalEvents int64
 	countQuery := "SELECT COUNT(*) FROM events WHERE contract_address = $1"
 	if err := h.db.QueryRow(countQuery, address).Scan(&totalEvents); err != nil {
-		h.logger.Error("Failed to get total events", zap.Error(err))
+		h.logger.Error("Failed to get total events", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get statistics"})
 		return
 	}
@@ -316,7 +316,7 @@ func (h *ContractHandler) GetContractStats(c *gin.Context) {
 	var latestBlock int64
 	latestQuery := "SELECT MAX(block_number) FROM events WHERE contract_address = $1"
 	if err := h.db.QueryRow(latestQuery, address).Scan(&latestBlock); err != nil {
-		h.logger.Error("Failed to get latest block", zap.Error(err))
+		h.logger.Error("Failed to get latest block", "error", err)
 		latestBlock = 0
 	}
 
@@ -324,7 +324,7 @@ func (h *ContractHandler) GetContractStats(c *gin.Context) {
 	var currentBlock int64
 	currentQuery := "SELECT current_block FROM contracts WHERE address = $1"
 	if err := h.db.QueryRow(currentQuery, address).Scan(&currentBlock); err != nil {
-		h.logger.Error("Failed to get current block", zap.Error(err))
+		h.logger.Error("Failed to get current block", "error", err)
 		currentBlock = latestBlock
 	}
 
