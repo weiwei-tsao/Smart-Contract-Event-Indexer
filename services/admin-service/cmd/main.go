@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -14,8 +13,8 @@ import (
 	"github.com/smart-contract-event-indexer/admin-service/internal/config"
 	"github.com/smart-contract-event-indexer/admin-service/internal/server"
 	"github.com/smart-contract-event-indexer/shared/database"
+	sharedconfig "github.com/smart-contract-event-indexer/shared/config"
 	"github.com/smart-contract-event-indexer/shared/utils"
-	"go.uber.org/zap"
 )
 
 func main() {
@@ -29,41 +28,47 @@ func main() {
 	}
 
 	// Initialize logger
-	logger, err := utils.NewLogger(cfg.LogLevel, cfg.LogFormat)
-	if err != nil {
-		log.Fatalf("Failed to create logger: %v", err)
-	}
-	defer logger.Sync()
-
-	logger.Info("Starting Admin Service", zap.String("version", "1.0.0"))
+	logger := utils.NewLogger("admin-service", cfg.LogLevel, cfg.LogFormat)
+	logger.Info("Starting Admin Service", "version", "1.0.0")
 
 	// Initialize database connection
-	db, err := database.NewConnection(cfg.DatabaseURL)
+	dbConfig := sharedconfig.DatabaseConfig{
+		URL:             cfg.DatabaseURL,
+		MaxOpenConns:    20,
+		MaxIdleConns:    5,
+		ConnMaxLifetime: 5 * time.Minute,
+	}
+	db, err := database.NewDB(dbConfig, logger)
 	if err != nil {
-		logger.Fatal("Failed to connect to database", zap.Error(err))
+		logger.Fatal("Failed to connect to database", "error", err)
 	}
 	defer db.Close()
 
 	// Initialize Redis connection
-	redisClient, err := database.NewRedisClient(cfg.RedisURL)
+	redisConfig := sharedconfig.RedisConfig{
+		URL:      cfg.RedisURL,
+		Password: "",
+		DB:       0,
+	}
+	redisClient, err := database.NewRedisClient(redisConfig, logger)
 	if err != nil {
-		logger.Fatal("Failed to connect to Redis", zap.Error(err))
+		logger.Fatal("Failed to connect to Redis", "error", err)
 	}
 	defer redisClient.Close()
 
 	// Create and start gRPC server
-	grpcServer := server.NewAdminServiceServer(db, redisClient, logger, cfg)
+	grpcServer := server.NewAdminServiceServer(db.DB, redisClient.Client, logger, cfg)
 
 	// Start server in a goroutine
 	go func() {
 		lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
 		if err != nil {
-			logger.Fatal("Failed to listen", zap.Error(err))
+			logger.Fatal("Failed to listen", "error", err)
 		}
 
-		logger.Info("Admin Service started", zap.String("address", lis.Addr().String()))
+		logger.Info("Admin Service started", "address", lis.Addr().String())
 		if err := grpcServer.Serve(lis); err != nil {
-			logger.Fatal("Failed to serve", zap.Error(err))
+			logger.Fatal("Failed to serve", "error", err)
 		}
 	}()
 
@@ -75,9 +80,6 @@ func main() {
 	logger.Info("Shutting down Admin Service...")
 
 	// Graceful shutdown
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	grpcServer.GracefulStop()
 
 	logger.Info("Admin Service stopped")

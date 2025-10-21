@@ -8,19 +8,18 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/smart-contract-event-indexer/query-service/internal/config"
-	"go.uber.org/zap"
+	"github.com/smart-contract-event-indexer/shared/utils"
 )
 
 // CacheManager handles caching operations
 type CacheManager struct {
 	client    *redis.Client
-	logger    *zap.Logger
+	logger    utils.Logger
 	defaultTTL time.Duration
 }
 
 // NewCacheManager creates a new cache manager
-func NewCacheManager(client *redis.Client, logger *zap.Logger, defaultTTL time.Duration) *CacheManager {
+func NewCacheManager(client *redis.Client, logger utils.Logger, defaultTTL time.Duration) *CacheManager {
 	return &CacheManager{
 		client:     client,
 		logger:     logger,
@@ -67,19 +66,19 @@ func (c *CacheManager) Get(ctx context.Context, key *CacheKey, dest interface{})
 	val, err := c.client.Get(ctx, keyStr).Result()
 	if err != nil {
 		if err == redis.Nil {
-			c.logger.Debug("Cache miss", zap.String("key", keyStr))
+			c.logger.Debug("Cache miss", "key", keyStr)
 			return ErrCacheMiss
 		}
-		c.logger.Error("Cache get error", zap.String("key", keyStr), zap.Error(err))
+		c.logger.Error("Cache get error", "key", keyStr, "error", err)
 		return err
 	}
 
 	if err := json.Unmarshal([]byte(val), dest); err != nil {
-		c.logger.Error("Cache unmarshal error", zap.String("key", keyStr), zap.Error(err))
+		c.logger.Error("Cache unmarshal error", "key", keyStr, "error", err)
 		return err
 	}
 
-	c.logger.Debug("Cache hit", zap.String("key", keyStr))
+	c.logger.Debug("Cache hit", "key", keyStr)
 	return nil
 }
 
@@ -89,7 +88,7 @@ func (c *CacheManager) Set(ctx context.Context, key *CacheKey, value interface{}
 	
 	jsonData, err := json.Marshal(value)
 	if err != nil {
-		c.logger.Error("Cache marshal error", zap.String("key", keyStr), zap.Error(err))
+		c.logger.Error("Cache marshal error", "key", keyStr, "error", err)
 		return err
 	}
 
@@ -98,11 +97,11 @@ func (c *CacheManager) Set(ctx context.Context, key *CacheKey, value interface{}
 	}
 
 	if err := c.client.Set(ctx, keyStr, jsonData, ttl).Err(); err != nil {
-		c.logger.Error("Cache set error", zap.String("key", keyStr), zap.Error(err))
+		c.logger.Error("Cache set error", "key", keyStr, "error", err)
 		return err
 	}
 
-	c.logger.Debug("Cache set", zap.String("key", keyStr), zap.Duration("ttl", ttl))
+	c.logger.Debug("Cache set", "key", keyStr, "ttl", ttl)
 	return nil
 }
 
@@ -111,11 +110,11 @@ func (c *CacheManager) Delete(ctx context.Context, key *CacheKey) error {
 	keyStr := key.String()
 	
 	if err := c.client.Del(ctx, keyStr).Err(); err != nil {
-		c.logger.Error("Cache delete error", zap.String("key", keyStr), zap.Error(err))
+		c.logger.Error("Cache delete error", "key", keyStr, "error", err)
 		return err
 	}
 
-	c.logger.Debug("Cache delete", zap.String("key", keyStr))
+	c.logger.Debug("Cache delete", "key", keyStr)
 	return nil
 }
 
@@ -123,7 +122,7 @@ func (c *CacheManager) Delete(ctx context.Context, key *CacheKey) error {
 func (c *CacheManager) DeletePattern(ctx context.Context, pattern string) error {
 	keys, err := c.client.Keys(ctx, pattern).Result()
 	if err != nil {
-		c.logger.Error("Cache keys error", zap.String("pattern", pattern), zap.Error(err))
+		c.logger.Error("Cache keys error", "pattern", pattern, "error", err)
 		return err
 	}
 
@@ -132,11 +131,11 @@ func (c *CacheManager) DeletePattern(ctx context.Context, pattern string) error 
 	}
 
 	if err := c.client.Del(ctx, keys...).Err(); err != nil {
-		c.logger.Error("Cache delete pattern error", zap.String("pattern", pattern), zap.Error(err))
+		c.logger.Error("Cache delete pattern error", "pattern", pattern, "error", err)
 		return err
 	}
 
-	c.logger.Debug("Cache delete pattern", zap.String("pattern", pattern), zap.Int("count", len(keys)))
+	c.logger.Debug("Cache delete pattern", "pattern", pattern, "count", len(keys))
 	return nil
 }
 
@@ -154,7 +153,7 @@ func (c *CacheManager) InvalidateContractCache(ctx context.Context, contractAddr
 		}
 	}
 
-	c.logger.Info("Invalidated contract cache", zap.String("contract", contractAddress))
+	c.logger.Info("Invalidated contract cache", "contract", contractAddress)
 	return nil
 }
 
@@ -178,7 +177,7 @@ func (c *CacheManager) InvalidateAllCache(ctx context.Context) error {
 
 // GetStats returns cache statistics
 func (c *CacheManager) GetStats(ctx context.Context) (*CacheStats, error) {
-	info, err := c.client.Info(ctx, "stats").Result()
+	_, err := c.client.Info(ctx, "stats").Result()
 	if err != nil {
 		return nil, err
 	}

@@ -3,20 +3,21 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/smart-contract-event-indexer/admin-service/internal/config"
 	"github.com/smart-contract-event-indexer/shared/models"
-	"go.uber.org/zap"
+	"github.com/smart-contract-event-indexer/shared/utils"
 )
 
 // AdminService handles administrative operations
 type AdminService struct {
 	db          *sql.DB
 	redisClient *redis.Client
-	logger      *zap.Logger
+	logger      utils.Logger
 	config      *config.Config
 }
 
@@ -24,7 +25,7 @@ type AdminService struct {
 func NewAdminService(
 	db *sql.DB,
 	redisClient *redis.Client,
-	logger *zap.Logger,
+	logger utils.Logger,
 	cfg *config.Config,
 ) *AdminService {
 	return &AdminService{
@@ -127,7 +128,7 @@ func (s *AdminService) AddContract(ctx context.Context, req *AddContractRequest)
 			Message:    "Contract already exists",
 		}, nil
 	} else if err != sql.ErrNoRows {
-		s.logger.Error("Failed to check existing contract", zap.Error(err))
+		s.logger.Error("Failed to check existing contract", "error", err)
 		return &AddContractResponse{
 			Success: false,
 			Message: "Failed to check existing contract",
@@ -136,7 +137,7 @@ func (s *AdminService) AddContract(ctx context.Context, req *AddContractRequest)
 
 	// Validate ABI JSON
 	var abiJSON models.JSONB
-	if err := abiJSON.UnmarshalJSON([]byte(req.ABI)); err != nil {
+	if err := json.Unmarshal([]byte(req.ABI), &abiJSON); err != nil {
 		return &AddContractResponse{
 			Success: false,
 			Message: "Invalid ABI JSON",
@@ -145,8 +146,8 @@ func (s *AdminService) AddContract(ctx context.Context, req *AddContractRequest)
 
 	// Insert new contract
 	insertQuery := `
-		INSERT INTO contracts (address, name, abi, start_block, current_block, confirm_blocks, is_active, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO contracts (address, name, abi, start_block, current_block, confirm_blocks, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id
 	`
 
@@ -159,20 +160,19 @@ func (s *AdminService) AddContract(ctx context.Context, req *AddContractRequest)
 		req.StartBlock,
 		req.StartBlock, // current_block starts at start_block
 		req.ConfirmBlocks,
-		true, // is_active
 		models.Now(),
 		models.Now(),
 	).Scan(&contractID)
 
 	if err != nil {
-		s.logger.Error("Failed to insert contract", zap.Error(err))
+		s.logger.Error("Failed to insert contract", "error", err)
 		return &AddContractResponse{
 			Success: false,
 			Message: "Failed to create contract",
 		}, nil
 	}
 
-	s.logger.Info("Contract added", zap.String("address", req.Address), zap.Int32("id", contractID))
+	s.logger.Info("Contract added", "address", req.Address, "id", contractID)
 
 	return &AddContractResponse{
 		Success:    true,
@@ -184,11 +184,11 @@ func (s *AdminService) AddContract(ctx context.Context, req *AddContractRequest)
 
 // RemoveContract removes a contract from monitoring
 func (s *AdminService) RemoveContract(ctx context.Context, req *RemoveContractRequest) (*RemoveContractResponse, error) {
-	// Mark contract as inactive instead of deleting
-	query := "UPDATE contracts SET is_active = false, updated_at = $1 WHERE address = $2"
-	result, err := s.db.ExecContext(ctx, query, models.Now(), req.Address)
+	// Delete contract (no is_active column in current schema)
+	query := "DELETE FROM contracts WHERE address = $1"
+	result, err := s.db.ExecContext(ctx, query, req.Address)
 	if err != nil {
-		s.logger.Error("Failed to remove contract", zap.Error(err))
+		s.logger.Error("Failed to remove contract", "error", err)
 		return &RemoveContractResponse{
 			Success: false,
 			Message: "Failed to remove contract",
@@ -197,7 +197,7 @@ func (s *AdminService) RemoveContract(ctx context.Context, req *RemoveContractRe
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		s.logger.Error("Failed to get rows affected", zap.Error(err))
+		s.logger.Error("Failed to get rows affected", "error", err)
 		return &RemoveContractResponse{
 			Success: false,
 			Message: "Failed to remove contract",
@@ -211,7 +211,7 @@ func (s *AdminService) RemoveContract(ctx context.Context, req *RemoveContractRe
 		}, nil
 	}
 
-	s.logger.Info("Contract removed", zap.String("address", req.Address))
+	s.logger.Info("Contract removed", "address", req.Address)
 
 	return &RemoveContractResponse{
 		Success: true,
@@ -253,7 +253,7 @@ func (s *AdminService) TriggerBackfill(ctx context.Context, req *BackfillRequest
 	// Store job metadata
 	jobKey := fmt.Sprintf("backfill_job:%s", jobID)
 	if err := s.redisClient.HSet(ctx, jobKey, jobData).Err(); err != nil {
-		s.logger.Error("Failed to store backfill job", zap.Error(err))
+		s.logger.Error("Failed to store backfill job", "error", err)
 		return &BackfillResponse{
 			Success: false,
 			Message: "Failed to create backfill job",
@@ -262,7 +262,7 @@ func (s *AdminService) TriggerBackfill(ctx context.Context, req *BackfillRequest
 
 	// Set job expiration (24 hours)
 	if err := s.redisClient.Expire(ctx, jobKey, 24*time.Hour).Err(); err != nil {
-		s.logger.Warn("Failed to set job expiration", zap.Error(err))
+		s.logger.Warn("Failed to set job expiration", "error", err)
 	}
 
 	// Calculate estimated time (simplified)
@@ -273,12 +273,7 @@ func (s *AdminService) TriggerBackfill(ctx context.Context, req *BackfillRequest
 		estimatedMinutes = 1
 	}
 
-	s.logger.Info("Backfill job created", 
-		zap.String("job_id", jobID),
-		zap.String("address", req.Address),
-		zap.Int64("from_block", req.FromBlock),
-		zap.Int64("to_block", req.ToBlock),
-	)
+	s.logger.Info("Backfill job created", "job_id", jobID, "address", req.Address, "from_block", req.FromBlock, "to_block", req.ToBlock)
 
 	return &BackfillResponse{
 		Success:       true,
@@ -292,22 +287,22 @@ func (s *AdminService) TriggerBackfill(ctx context.Context, req *BackfillRequest
 func (s *AdminService) GetSystemStatus(ctx context.Context) (*SystemStatusResponse, error) {
 	// Get total contracts count
 	var totalContracts int32
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM contracts WHERE is_active = true").Scan(&totalContracts); err != nil {
-		s.logger.Error("Failed to get total contracts", zap.Error(err))
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM contracts").Scan(&totalContracts); err != nil {
+		s.logger.Error("Failed to get total contracts", "error", err)
 		totalContracts = 0
 	}
 
 	// Get total events count
 	var totalEvents int64
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events").Scan(&totalEvents); err != nil {
-		s.logger.Error("Failed to get total events", zap.Error(err))
+		s.logger.Error("Failed to get total events", "error", err)
 		totalEvents = 0
 	}
 
 	// Get latest indexed block
 	var lastIndexedBlock int64
 	if err := s.db.QueryRowContext(ctx, "SELECT MAX(block_number) FROM events").Scan(&lastIndexedBlock); err != nil {
-		s.logger.Error("Failed to get last indexed block", zap.Error(err))
+		s.logger.Error("Failed to get last indexed block", "error", err)
 		lastIndexedBlock = 0
 	}
 

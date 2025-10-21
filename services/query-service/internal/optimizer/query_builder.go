@@ -3,24 +3,24 @@ package optimizer
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/smart-contract-event-indexer/query-service/internal/service"
+	"github.com/smart-contract-event-indexer/query-service/internal/types"
 	"github.com/smart-contract-event-indexer/shared/models"
-	"go.uber.org/zap"
+	"github.com/smart-contract-event-indexer/shared/utils"
 )
 
 // QueryBuilder handles SQL query construction and optimization
 type QueryBuilder struct {
 	db     *sql.DB
-	logger *zap.Logger
+	logger utils.Logger
 }
 
 // NewQueryBuilder creates a new QueryBuilder
-func NewQueryBuilder(db *sql.DB, logger *zap.Logger) *QueryBuilder {
+func NewQueryBuilder(db *sql.DB, logger utils.Logger) *QueryBuilder {
 	return &QueryBuilder{
 		db:     db,
 		logger: logger,
@@ -28,13 +28,13 @@ func NewQueryBuilder(db *sql.DB, logger *zap.Logger) *QueryBuilder {
 }
 
 // BuildEventQuery builds and executes a query for events
-func (qb *QueryBuilder) BuildEventQuery(ctx context.Context, query *service.EventQuery) ([]*models.Event, int32, error) {
+func (qb *QueryBuilder) BuildEventQuery(ctx context.Context, query *types.EventQuery) ([]*models.Event, int32, error) {
 	// Build the base query
 	baseQuery := `
 		SELECT 
-			e.id, e.contract_id, e.contract_address, e.event_name,
-			e.block_number, e.block_timestamp, e.transaction_hash,
-			e.transaction_index, e.log_index, e.args, e.raw_log, e.created_at
+			e.id, 	e.contract_address, e.event_name,
+			e.block_number, e.block_hash, e.transaction_hash,
+			e.transaction_index, e.log_index, e.args, e.timestamp, e.created_at
 		FROM events e
 		WHERE 1=1
 	`
@@ -74,7 +74,7 @@ func (qb *QueryBuilder) BuildEventQuery(ctx context.Context, query *service.Even
 
 	var totalCount int32
 	if err := qb.db.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount); err != nil {
-		qb.logger.Warn("Failed to get total count", zap.Error(err))
+		qb.logger.Warn("Failed to get total count", "error", err)
 		totalCount = int32(len(events))
 	}
 
@@ -82,13 +82,13 @@ func (qb *QueryBuilder) BuildEventQuery(ctx context.Context, query *service.Even
 }
 
 // BuildAddressQuery builds and executes a query for events by address
-func (qb *QueryBuilder) BuildAddressQuery(ctx context.Context, query *service.AddressQuery) ([]*models.Event, int32, error) {
+func (qb *QueryBuilder) BuildAddressQuery(ctx context.Context, query *types.AddressQuery) ([]*models.Event, int32, error) {
 	// Build the base query with JSONB search
 	baseQuery := `
 		SELECT 
-			e.id, e.contract_id, e.contract_address, e.event_name,
-			e.block_number, e.block_timestamp, e.transaction_hash,
-			e.transaction_index, e.log_index, e.args, e.raw_log, e.created_at
+			e.id, 	e.contract_address, e.event_name,
+			e.block_number, e.block_hash, e.transaction_hash,
+			e.transaction_index, e.log_index, e.args, e.timestamp, e.created_at
 		FROM events e
 		WHERE e.args @> $1
 	`
@@ -135,7 +135,7 @@ func (qb *QueryBuilder) BuildAddressQuery(ctx context.Context, query *service.Ad
 
 	var totalCount int32
 	if err := qb.db.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount); err != nil {
-		qb.logger.Warn("Failed to get total count", zap.Error(err))
+		qb.logger.Warn("Failed to get total count", "error", err)
 		totalCount = int32(len(events))
 	}
 
@@ -143,12 +143,12 @@ func (qb *QueryBuilder) BuildAddressQuery(ctx context.Context, query *service.Ad
 }
 
 // BuildTransactionQuery builds and executes a query for events by transaction
-func (qb *QueryBuilder) BuildTransactionQuery(ctx context.Context, query *service.TransactionQuery) ([]*models.Event, error) {
+func (qb *QueryBuilder) BuildTransactionQuery(ctx context.Context, query *types.TransactionQuery) ([]*models.Event, error) {
 	queryStr := `
 		SELECT 
-			e.id, e.contract_id, e.contract_address, e.event_name,
-			e.block_number, e.block_timestamp, e.transaction_hash,
-			e.transaction_index, e.log_index, e.args, e.raw_log, e.created_at
+			e.id, 	e.contract_address, e.event_name,
+			e.block_number, e.block_hash, e.transaction_hash,
+			e.transaction_index, e.log_index, e.args, e.timestamp, e.created_at
 		FROM events e
 		WHERE e.transaction_hash = $1
 		ORDER BY e.log_index ASC
@@ -169,7 +169,7 @@ func (qb *QueryBuilder) BuildTransactionQuery(ctx context.Context, query *servic
 }
 
 // BuildStatsQuery builds and executes a query for contract statistics
-func (qb *QueryBuilder) BuildStatsQuery(ctx context.Context, query *service.StatsQuery) (*service.StatsResponse, error) {
+func (qb *QueryBuilder) BuildStatsQuery(ctx context.Context, query *types.StatsQuery) (*types.StatsResponse, error) {
 	// Get total events count
 	var totalEvents int64
 	countQuery := `SELECT COUNT(*) FROM events WHERE contract_address = $1`
@@ -197,7 +197,7 @@ func (qb *QueryBuilder) BuildStatsQuery(ctx context.Context, query *service.Stat
 		lastUpdated = time.Now()
 	}
 
-	return &service.StatsResponse{
+	return &types.StatsResponse{
 		ContractAddress: query.ContractAddress,
 		TotalEvents:     totalEvents,
 		LatestBlock:     latestBlock,
@@ -208,7 +208,7 @@ func (qb *QueryBuilder) BuildStatsQuery(ctx context.Context, query *service.Stat
 }
 
 // buildEventWhereClause builds the WHERE clause for event queries
-func (qb *QueryBuilder) buildEventWhereClause(query *service.EventQuery) (string, []interface{}) {
+func (qb *QueryBuilder) buildEventWhereClause(query *types.EventQuery) (string, []interface{}) {
 	var conditions []string
 	var args []interface{}
 	argIndex := 1
@@ -269,20 +269,18 @@ func (qb *QueryBuilder) parseEvents(rows *sql.Rows) ([]*models.Event, error) {
 	for rows.Next() {
 		var event models.Event
 		var argsJSON string
-		var rawLogJSON string
 
 		err := rows.Scan(
 			&event.ID,
-			&event.ContractID,
 			&event.ContractAddress,
 			&event.EventName,
 			&event.BlockNumber,
-			&event.BlockTimestamp,
-			&event.TxHash,
-			&event.TxIndex,
+			&event.BlockHash,
+			&event.TransactionHash,
+			&event.TransactionIndex,
 			&event.LogIndex,
 			&argsJSON,
-			&rawLogJSON,
+			&event.Timestamp,
 			&event.CreatedAt,
 		)
 		if err != nil {
@@ -290,16 +288,9 @@ func (qb *QueryBuilder) parseEvents(rows *sql.Rows) ([]*models.Event, error) {
 		}
 
 		// Parse JSONB args
-		if err := event.Args.UnmarshalJSON([]byte(argsJSON)); err != nil {
-			qb.logger.Warn("Failed to parse event args", zap.Error(err))
+		if err := json.Unmarshal([]byte(argsJSON), &event.Args); err != nil {
+			qb.logger.Warn("Failed to parse event args", "error", err)
 			event.Args = models.JSONB{}
-		}
-
-		// Parse raw log if present
-		if rawLogJSON != "" {
-			if err := event.RawLog.UnmarshalJSON([]byte(rawLogJSON)); err != nil {
-				qb.logger.Warn("Failed to parse raw log", zap.Error(err))
-			}
 		}
 
 		events = append(events, &event)

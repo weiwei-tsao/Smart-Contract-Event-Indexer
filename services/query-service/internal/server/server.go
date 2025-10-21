@@ -12,9 +12,8 @@ import (
 	"github.com/smart-contract-event-indexer/query-service/internal/cache"
 	"github.com/smart-contract-event-indexer/query-service/internal/service"
 	"github.com/smart-contract-event-indexer/query-service/internal/config"
-	"go.uber.org/zap"
+	"github.com/smart-contract-event-indexer/shared/utils"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
@@ -24,7 +23,7 @@ type QueryServiceServer struct {
 	redisClient *redis.Client
 	cache       *cache.CacheManager
 	queryService *service.QueryService
-	logger      *zap.Logger
+	logger      utils.Logger
 	config      *config.Config
 
 	// Metrics
@@ -38,7 +37,7 @@ type QueryServiceServer struct {
 func NewQueryServiceServer(
 	db *sql.DB,
 	redisClient *redis.Client,
-	logger *zap.Logger,
+	logger utils.Logger,
 	cfg *config.Config,
 ) *grpc.Server {
 	// Initialize cache manager
@@ -84,10 +83,7 @@ func (s *QueryServiceServer) unaryInterceptor(
 	start := time.Now()
 
 	// Log the request
-	s.logger.Info("gRPC request",
-		zap.String("method", info.FullMethod),
-		zap.Any("request", req),
-	)
+	s.logger.Info("gRPC request", "method", info.FullMethod, "request", req)
 
 	// Call the handler
 	resp, err := handler(ctx, req)
@@ -99,16 +95,9 @@ func (s *QueryServiceServer) unaryInterceptor(
 
 	// Log the response
 	if err != nil {
-		s.logger.Error("gRPC request failed",
-			zap.String("method", info.FullMethod),
-			zap.Error(err),
-			zap.Duration("duration", duration),
-		)
+		s.logger.Error("gRPC request failed", "method", info.FullMethod, "error", err, "duration", duration)
 	} else {
-		s.logger.Info("gRPC request completed",
-			zap.String("method", info.FullMethod),
-			zap.Duration("duration", duration),
-		)
+		s.logger.Info("gRPC request completed", "method", info.FullMethod, "duration", duration)
 	}
 
 	return resp, err
@@ -123,9 +112,7 @@ func (s *QueryServiceServer) streamInterceptor(
 ) error {
 	start := time.Now()
 
-	s.logger.Info("gRPC stream request",
-		zap.String("method", info.FullMethod),
-	)
+	s.logger.Info("gRPC stream request", "method", info.FullMethod)
 
 	err := handler(srv, ss)
 
@@ -134,16 +121,9 @@ func (s *QueryServiceServer) streamInterceptor(
 	s.queryTotal.WithLabelValues(info.FullMethod, status.Code(err).String()).Inc()
 
 	if err != nil {
-		s.logger.Error("gRPC stream request failed",
-			zap.String("method", info.FullMethod),
-			zap.Error(err),
-			zap.Duration("duration", duration),
-		)
+		s.logger.Error("gRPC stream request failed", "method", info.FullMethod, "error", err, "duration", duration)
 	} else {
-		s.logger.Info("gRPC stream request completed",
-			zap.String("method", info.FullMethod),
-			zap.Duration("duration", duration),
-		)
+		s.logger.Info("gRPC stream request completed", "method", info.FullMethod, "duration", duration)
 	}
 
 	return err

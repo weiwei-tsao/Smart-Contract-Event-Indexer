@@ -11,9 +11,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/smart-contract-event-indexer/admin-service/internal/config"
 	"github.com/smart-contract-event-indexer/admin-service/internal/service"
-	"go.uber.org/zap"
+	"github.com/smart-contract-event-indexer/shared/utils"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
@@ -22,7 +21,7 @@ type AdminServiceServer struct {
 	db          *sql.DB
 	redisClient *redis.Client
 	adminService *service.AdminService
-	logger      *zap.Logger
+	logger      utils.Logger
 	config      *config.Config
 
 	// Metrics
@@ -34,7 +33,7 @@ type AdminServiceServer struct {
 func NewAdminServiceServer(
 	db *sql.DB,
 	redisClient *redis.Client,
-	logger *zap.Logger,
+	logger utils.Logger,
 	cfg *config.Config,
 ) *grpc.Server {
 	// Initialize admin service
@@ -76,10 +75,7 @@ func (s *AdminServiceServer) unaryInterceptor(
 	start := time.Now()
 
 	// Log the request
-	s.logger.Info("gRPC request",
-		zap.String("method", info.FullMethod),
-		zap.Any("request", req),
-	)
+	s.logger.Info("gRPC request", "method", info.FullMethod, "request", req)
 
 	// Call the handler
 	resp, err := handler(ctx, req)
@@ -91,16 +87,9 @@ func (s *AdminServiceServer) unaryInterceptor(
 
 	// Log the response
 	if err != nil {
-		s.logger.Error("gRPC request failed",
-			zap.String("method", info.FullMethod),
-			zap.Error(err),
-			zap.Duration("duration", duration),
-		)
+		s.logger.Error("gRPC request failed", "method", info.FullMethod, "error", err, "duration", duration)
 	} else {
-		s.logger.Info("gRPC request completed",
-			zap.String("method", info.FullMethod),
-			zap.Duration("duration", duration),
-		)
+		s.logger.Info("gRPC request completed", "method", info.FullMethod, "duration", duration)
 	}
 
 	return resp, err
@@ -116,7 +105,7 @@ func (s *AdminServiceServer) streamInterceptor(
 	start := time.Now()
 
 	s.logger.Info("gRPC stream request",
-		zap.String("method", info.FullMethod),
+("method", info.FullMethod),
 	)
 
 	err := handler(srv, ss)
@@ -126,16 +115,9 @@ func (s *AdminServiceServer) streamInterceptor(
 	s.requestTotal.WithLabelValues(info.FullMethod, status.Code(err).String()).Inc()
 
 	if err != nil {
-		s.logger.Error("gRPC stream request failed",
-			zap.String("method", info.FullMethod),
-			zap.Error(err),
-			zap.Duration("duration", duration),
-		)
+		s.logger.Error("gRPC stream request failed", "method", info.FullMethod, "error", err, "duration", duration)
 	} else {
-		s.logger.Info("gRPC stream request completed",
-			zap.String("method", info.FullMethod),
-			zap.Duration("duration", duration),
-		)
+		s.logger.Info("gRPC stream request completed", "method", info.FullMethod, "duration", duration)
 	}
 
 	return err
