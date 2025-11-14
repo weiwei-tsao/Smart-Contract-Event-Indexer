@@ -20,6 +20,10 @@ coverage.html
 
 # Dependency directories
 vendor/
+.gocache/
+.gomodcache/
+**/.gocache/
+**/.gomodcache/
 
 # Build artifacts
 /services/*/main
