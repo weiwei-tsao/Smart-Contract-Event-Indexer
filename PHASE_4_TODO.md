@@ -18,7 +18,7 @@
 ## Workstream 4 – Aggregations & Contract Stats
 - [x] Flesh out `GetContractStats` with accurate `currentBlock`, `indexerDelay`, and optional unique-address counters (docs/smart_contract_event_indexer_plan.md:513-530).
 - [x] Add reusable aggregation helpers for time-range + top-N queries, backed by cache tier with longer TTLs.
-- [ ] Document aggregation schema/usage for GraphQL + gRPC clients (docs/smart_contract_event_indexer_prd.md:404-433).
+- [x] Document aggregation schema/usage for GraphQL + gRPC clients (docs/smart_contract_event_indexer_prd.md:404-433).
 
 ## Workstream 5 – Validation & Operational Readiness
 - [ ] Author targeted unit/integration tests for pagination, cache hit/miss paths, and stats to reach 75%+ coverage (.cursor/plans/phase-3-api-layer-315839c7.plan.md:392-418).
