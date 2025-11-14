@@ -62,11 +62,23 @@ temp/
 *.pb.go
 *_gen.go
 
+# Node tooling (Solidity contract compilation)
+**/node_modules/
+
+# Integration test artifacts (generated via services/indexer-service/tests/integration/contracts/compile.js)
+TestERC20.abi.json
+TestERC20.bytecode.json
+
 # Testing
 .testcache/
 
 # Tools
 .tools/
+
+# Terraform state
+.terraform/
+*.tfstate
+*.tfstate.backup
 
 # Migration tool state
 *.dirty
