@@ -21,6 +21,6 @@
 - [x] Document aggregation schema/usage for GraphQL + gRPC clients (docs/smart_contract_event_indexer_prd.md:404-433).
 
 ## Workstream 5 – Validation & Operational Readiness
-- [ ] Author targeted unit/integration tests for pagination, cache hit/miss paths, and stats to reach 75%+ coverage (.cursor/plans/phase-3-api-layer-315839c7.plan.md:392-418).
+- [x] Author targeted unit/integration tests for pagination, cache hit/miss paths, and stats to reach 75%+ coverage (.cursor/plans/phase-3-api-layer-315839c7.plan.md:392-418).
 - [ ] Run load tests (≥100 concurrent requests) capturing latency + cache hit metrics; attach findings to docs.
-- [ ] Publish ops runbooks covering deployment checklist, Redis/DB dependencies, and monitoring hooks for Phase 5 handoff.
+- [x] Publish ops runbooks covering deployment checklist, Redis/DB dependencies, and monitoring hooks for Phase 5 handoff.
