@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"strings"
 	"time"
 
+	"github.com/smart-contract-event-indexer/query-service/internal/config"
 	"github.com/smart-contract-event-indexer/query-service/internal/types"
 	"github.com/smart-contract-event-indexer/shared/models"
 	"github.com/smart-contract-event-indexer/shared/utils"
@@ -17,18 +19,99 @@ import (
 type QueryBuilder struct {
 	db     *sql.DB
 	logger utils.Logger
+	config *config.Config
+}
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
 }
 
 // NewQueryBuilder creates a new QueryBuilder
-func NewQueryBuilder(db *sql.DB, logger utils.Logger) *QueryBuilder {
+func NewQueryBuilder(db *sql.DB, logger utils.Logger, cfg *config.Config) *QueryBuilder {
 	return &QueryBuilder{
 		db:     db,
 		logger: logger,
+		config: cfg,
 	}
+}
+
+// BuildSimpleEventQuery uses a streamlined SQL path for common filters.
+func (qb *QueryBuilder) BuildSimpleEventQuery(ctx context.Context, query *types.EventQuery) ([]*models.Event, int32, error) {
+	if query.ContractAddress == nil {
+		return nil, 0, fmt.Errorf("simple event query requires contract address")
+	}
+
+	ctx, cancel := qb.withTimeout(ctx)
+	defer cancel()
+
+	baseQuery := `
+		SELECT 
+			e.id, e.contract_address, e.event_name,
+			e.block_number, e.block_hash, e.transaction_hash,
+			e.transaction_index, e.log_index, e.args, e.timestamp, e.created_at
+		FROM events e
+		WHERE e.contract_address = $1
+	`
+
+	args := []interface{}{*query.ContractAddress}
+	argIndex := 2
+
+	if query.EventName != nil {
+		baseQuery += fmt.Sprintf(" AND e.event_name = $%d", argIndex)
+		args = append(args, *query.EventName)
+		argIndex++
+	}
+
+	if query.FromBlock != nil {
+		baseQuery += fmt.Sprintf(" AND e.block_number >= $%d", argIndex)
+		args = append(args, *query.FromBlock)
+		argIndex++
+	}
+
+	if query.ToBlock != nil {
+		baseQuery += fmt.Sprintf(" AND e.block_number <= $%d", argIndex)
+		args = append(args, *query.ToBlock)
+		argIndex++
+	}
+
+	order := " ORDER BY e.block_number DESC, e.log_index ASC"
+	limitClause, limitArgs := qb.buildLimitClause(query.First, query.Last, query.Limit, query.Offset, argIndex)
+	argIndex += len(limitArgs)
+
+	queryStr := baseQuery + order + limitClause
+	args = append(args, limitArgs...)
+
+	rows, err := qb.executeRows(ctx, "events.simple", queryStr, args)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	events, err := qb.parseEvents(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	countQuery := "SELECT COUNT(*) FROM events e WHERE e.contract_address = $1"
+	countArgs := []interface{}{*query.ContractAddress}
+	if query.EventName != nil {
+		countQuery += " AND e.event_name = $2"
+		countArgs = append(countArgs, *query.EventName)
+	}
+
+	var totalCount int32
+	if err := qb.queryRow(ctx, "events.simple.count", countQuery, countArgs, &totalCount); err != nil {
+		return events, int32(len(events)), nil
+	}
+
+	return events, totalCount, nil
 }
 
 // BuildEventQuery builds and executes a query for events
 func (qb *QueryBuilder) BuildEventQuery(ctx context.Context, query *types.EventQuery) ([]*models.Event, int32, error) {
+	ctx, cancel := qb.withTimeout(ctx)
+	defer cancel()
+
 	// Build the base query
 	baseQuery := `
 		SELECT 
@@ -39,27 +122,15 @@ func (qb *QueryBuilder) BuildEventQuery(ctx context.Context, query *types.EventQ
 		WHERE 1=1
 	`
 
-	// Build WHERE conditions
 	whereClause, args := qb.buildEventWhereClause(query)
-	queryStr := baseQuery + whereClause
+	countArgs := append([]interface{}{}, args...)
 
-	// Add ORDER BY
-	queryStr += " ORDER BY e.block_number DESC, e.log_index ASC"
+	queryStr := baseQuery + whereClause + " ORDER BY e.block_number DESC, e.log_index ASC"
+	limitClause, limitArgs := qb.buildLimitClause(query.First, query.Last, query.Limit, query.Offset, len(args)+1)
+	queryStr += limitClause
+	args = append(args, limitArgs...)
 
-	// Add LIMIT/OFFSET
-	limit := qb.getLimit(query.First, query.Last, 20)
-	if query.Limit > 0 {
-		limit = query.Limit
-	}
-	if limit > 0 {
-		queryStr += fmt.Sprintf(" LIMIT %d", limit)
-	}
-	if query.Offset > 0 {
-		queryStr += fmt.Sprintf(" OFFSET %d", query.Offset)
-	}
-
-	// Execute query
-	rows, err := qb.db.QueryContext(ctx, queryStr, args...)
+	rows, err := qb.executeRows(ctx, "events.complex", queryStr, args)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to execute event query: %w", err)
 	}
@@ -79,9 +150,8 @@ func (qb *QueryBuilder) BuildEventQuery(ctx context.Context, query *types.EventQ
 	` + whereClause
 
 	var totalCount int32
-	if err := qb.db.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount); err != nil {
-		qb.logger.Warn("Failed to get total count", "error", err)
-		totalCount = int32(len(events))
+	if err := qb.queryRow(ctx, "events.complex.count", countQuery, countArgs, &totalCount); err != nil {
+		return events, int32(len(events)), nil
 	}
 
 	return events, totalCount, nil
@@ -89,66 +159,67 @@ func (qb *QueryBuilder) BuildEventQuery(ctx context.Context, query *types.EventQ
 
 // BuildAddressQuery builds and executes a query for events by address
 func (qb *QueryBuilder) BuildAddressQuery(ctx context.Context, query *types.AddressQuery) ([]*models.Event, int32, error) {
-	// Build the base query with JSONB search
+	ctx, cancel := qb.withTimeout(ctx)
+	defer cancel()
+
 	baseQuery := `
 		SELECT 
 			e.id, 	e.contract_address, e.event_name,
 			e.block_number, e.block_hash, e.transaction_hash,
 			e.transaction_index, e.log_index, e.args, e.timestamp, e.created_at
 		FROM events e
-		WHERE e.args @> $1
+		WHERE %s
 	`
 
-	args := []interface{}{fmt.Sprintf(`{"from": "%s"}`, query.Address)}
+	filter, filterArgs := qb.buildAddressClause(query.Address, 1)
+	args := filterArgs
+	argIndex := len(args) + 1
 
-	// Add contract filter if specified
 	if query.ContractAddress != nil {
-		baseQuery += " AND e.contract_address = $2"
+		filter += fmt.Sprintf(" AND e.contract_address = $%d", argIndex)
 		args = append(args, *query.ContractAddress)
+		argIndex++
 	}
 
-	// Add ORDER BY
-	baseQuery += " ORDER BY e.block_number DESC, e.log_index ASC"
-
-	// Add LIMIT/OFFSET
-	limit := qb.getLimit(query.First, query.Last, 20)
-	if query.Limit > 0 {
-		limit = query.Limit
-	}
-	if limit > 0 {
-		baseQuery += fmt.Sprintf(" LIMIT %d", limit)
-	}
-	if query.Offset > 0 {
-		baseQuery += fmt.Sprintf(" OFFSET %d", query.Offset)
+	if query.EventName != nil {
+		filter += fmt.Sprintf(" AND e.event_name = $%d", argIndex)
+		args = append(args, *query.EventName)
+		argIndex++
 	}
 
-	// Execute query
-	rows, err := qb.db.QueryContext(ctx, baseQuery, args...)
+	if query.FromBlock != nil {
+		filter += fmt.Sprintf(" AND e.block_number >= $%d", argIndex)
+		args = append(args, *query.FromBlock)
+		argIndex++
+	}
+
+	if query.ToBlock != nil {
+		filter += fmt.Sprintf(" AND e.block_number <= $%d", argIndex)
+		args = append(args, *query.ToBlock)
+		argIndex++
+	}
+
+	countArgs := append([]interface{}{}, args...)
+	queryStr := fmt.Sprintf(baseQuery, filter) + " ORDER BY e.block_number DESC, e.log_index ASC"
+	limitClause, limitArgs := qb.buildLimitClause(query.First, query.Last, query.Limit, query.Offset, argIndex)
+	queryStr += limitClause
+	args = append(args, limitArgs...)
+
+	rows, err := qb.executeRows(ctx, "events.address", queryStr, args)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to execute address query: %w", err)
 	}
 	defer rows.Close()
 
-	// Parse results
 	events, err := qb.parseEvents(rows)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to parse events: %w", err)
 	}
 
-	// Get total count
-	countQuery := `
-		SELECT COUNT(*)
-		FROM events e
-		WHERE e.args @> $1
-	`
-	if query.ContractAddress != nil {
-		countQuery += " AND e.contract_address = $2"
-	}
-
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM events e WHERE %s", filter)
 	var totalCount int32
-	if err := qb.db.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount); err != nil {
-		qb.logger.Warn("Failed to get total count", "error", err)
-		totalCount = int32(len(events))
+	if err := qb.queryRow(ctx, "events.address.count", countQuery, countArgs, &totalCount); err != nil {
+		return events, int32(len(events)), nil
 	}
 
 	return events, totalCount, nil
@@ -156,6 +227,9 @@ func (qb *QueryBuilder) BuildAddressQuery(ctx context.Context, query *types.Addr
 
 // BuildTransactionQuery builds and executes a query for events by transaction
 func (qb *QueryBuilder) BuildTransactionQuery(ctx context.Context, query *types.TransactionQuery) ([]*models.Event, error) {
+	ctx, cancel := qb.withTimeout(ctx)
+	defer cancel()
+
 	queryStr := `
 		SELECT 
 			e.id, 	e.contract_address, e.event_name,
@@ -166,7 +240,7 @@ func (qb *QueryBuilder) BuildTransactionQuery(ctx context.Context, query *types.
 		ORDER BY e.log_index ASC
 	`
 
-	rows, err := qb.db.QueryContext(ctx, queryStr, query.TransactionHash)
+	rows, err := qb.executeRows(ctx, "events.tx", queryStr, []interface{}{query.TransactionHash})
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute transaction query: %w", err)
 	}
@@ -182,41 +256,182 @@ func (qb *QueryBuilder) BuildTransactionQuery(ctx context.Context, query *types.
 
 // BuildStatsQuery builds and executes a query for contract statistics
 func (qb *QueryBuilder) BuildStatsQuery(ctx context.Context, query *types.StatsQuery) (*types.StatsResponse, error) {
-	// Get total events count
-	var totalEvents int64
+	ctx, cancel := qb.withTimeout(ctx)
+	defer cancel()
+
+	stats := &types.StatsResponse{
+		ContractAddress: query.ContractAddress,
+	}
+
 	countQuery := `SELECT COUNT(*) FROM events WHERE contract_address = $1`
-	if err := qb.db.QueryRowContext(ctx, countQuery, query.ContractAddress).Scan(&totalEvents); err != nil {
+	if err := qb.queryRow(ctx, "stats.count", countQuery, []interface{}{query.ContractAddress}, &stats.TotalEvents); err != nil {
 		return nil, fmt.Errorf("failed to get total events: %w", err)
 	}
 
-	// Get latest indexed block
-	var latestBlock int64
-	latestQuery := `SELECT MAX(block_number) FROM events WHERE contract_address = $1`
-	if err := qb.db.QueryRowContext(ctx, latestQuery, query.ContractAddress).Scan(&latestBlock); err != nil {
+	latestQuery := `SELECT COALESCE(MAX(block_number), 0) FROM events WHERE contract_address = $1`
+	if err := qb.queryRow(ctx, "stats.latest", latestQuery, []interface{}{query.ContractAddress}, &stats.LatestBlock); err != nil {
 		return nil, fmt.Errorf("failed to get latest block: %w", err)
 	}
 
-	// Get current chain block (simplified - in production you'd get this from a chain client)
-	currentBlock := latestBlock // This would be fetched from RPC in production
-
-	// Calculate indexer delay (simplified)
-	indexerDelay := int64(0) // This would be calculated based on current time vs block timestamp
-
-	// Get last updated time
-	var lastUpdated time.Time
-	lastUpdatedQuery := `SELECT MAX(created_at) FROM events WHERE contract_address = $1`
-	if err := qb.db.QueryRowContext(ctx, lastUpdatedQuery, query.ContractAddress).Scan(&lastUpdated); err != nil {
-		lastUpdated = time.Now()
+	var currentBlock sql.NullInt64
+	var lastUpdated sql.NullTime
+	stateQuery := `SELECT last_indexed_block, updated_at FROM indexer_state WHERE contract_address = $1`
+	switch err := qb.db.QueryRowContext(ctx, stateQuery, query.ContractAddress).Scan(&currentBlock, &lastUpdated); err {
+	case nil:
+		stats.CurrentBlock = currentBlock.Int64
+		if lastUpdated.Valid {
+			stats.LastUpdated = lastUpdated.Time
+		}
+	case sql.ErrNoRows:
+		stats.CurrentBlock = stats.LatestBlock
+	default:
+		return nil, fmt.Errorf("failed to load indexer state: %w", err)
 	}
 
-	return &types.StatsResponse{
-		ContractAddress: query.ContractAddress,
-		TotalEvents:     totalEvents,
-		LatestBlock:     latestBlock,
-		CurrentBlock:    currentBlock,
-		IndexerDelay:    indexerDelay,
-		LastUpdated:     lastUpdated,
-	}, nil
+	if stats.CurrentBlock == 0 {
+		stats.CurrentBlock = stats.LatestBlock
+	}
+
+	if stats.LastUpdated.IsZero() {
+		if err := qb.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(created_at), NOW()) FROM events WHERE contract_address = $1`, query.ContractAddress).Scan(&stats.LastUpdated); err != nil {
+			stats.LastUpdated = time.Now()
+		}
+	}
+
+	if stats.CurrentBlock >= stats.LatestBlock {
+		stats.IndexerDelay = stats.CurrentBlock - stats.LatestBlock
+	} else {
+		stats.IndexerDelay = stats.LatestBlock - stats.CurrentBlock
+	}
+
+	var uniqueAddresses sql.NullInt64
+	uniqueQuery := `
+		WITH addresses AS (
+			SELECT LOWER(kv.value) AS addr
+			FROM events e
+			CROSS JOIN LATERAL jsonb_each_text(e.args) kv(key, value)
+			WHERE e.contract_address = $1
+			  AND kv.value ~ '^0x[0-9a-fA-F]{40}$'
+		)
+		SELECT COUNT(DISTINCT addr) FROM addresses
+	`
+	if err := qb.db.QueryRowContext(ctx, uniqueQuery, query.ContractAddress).Scan(&uniqueAddresses); err == nil && uniqueAddresses.Valid {
+		count := uniqueAddresses.Int64
+		stats.UniqueAddresses = &count
+	}
+
+	return stats, nil
+}
+
+// BuildTimeRangeAggregation returns bucketed totals for a contract.
+func (qb *QueryBuilder) BuildTimeRangeAggregation(ctx context.Context, query *types.TimeRangeQuery) ([]*types.TimeBucketStat, error) {
+	ctx, cancel := qb.withTimeout(ctx)
+	defer cancel()
+
+	interval := strings.ToLower(query.Interval)
+	if interval == "" {
+		interval = "hour"
+	}
+
+	intervalDuration := fmt.Sprintf("1 %s", interval)
+
+	sqlQuery := `
+		SELECT 
+			date_trunc($3, e.timestamp) AS bucket_start,
+			date_trunc($3, e.timestamp) + $4::interval AS bucket_end,
+			COUNT(*) as total
+		FROM events e
+		WHERE e.contract_address = $1
+		  AND e.timestamp BETWEEN $2 AND $5
+	`
+
+	args := []interface{}{
+		query.ContractAddress,
+		query.From,
+		interval,
+		intervalDuration,
+		query.To,
+	}
+	if query.EventName != nil {
+		sqlQuery += " AND e.event_name = $6"
+		args = append(args, *query.EventName)
+	}
+
+	sqlQuery += " GROUP BY bucket_start, bucket_end ORDER BY bucket_start ASC"
+
+	rows, err := qb.executeRows(ctx, "aggregate.range", sqlQuery, args)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var buckets []*types.TimeBucketStat
+	for rows.Next() {
+		var bucket types.TimeBucketStat
+		if err := rows.Scan(&bucket.BucketStart, &bucket.BucketEnd, &bucket.EventCount); err != nil {
+			return nil, err
+		}
+		buckets = append(buckets, &bucket)
+	}
+
+	return buckets, rows.Err()
+}
+
+// BuildTopAddresses ranks addresses by activity.
+func (qb *QueryBuilder) BuildTopAddresses(ctx context.Context, query *types.TopNQuery) ([]*types.TopAddressStat, error) {
+	ctx, cancel := qb.withTimeout(ctx)
+	defer cancel()
+
+	window := query.Window
+	if window <= 0 {
+		window = 24 * time.Hour
+	}
+
+	limit := query.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+
+	topQuery := `
+		SELECT LOWER(kv.value) AS address, COUNT(*) AS total
+		FROM events e
+		CROSS JOIN LATERAL jsonb_each_text(e.args) kv(key, value)
+		WHERE e.contract_address = $1
+		  AND kv.value ~ '^0x[0-9a-fA-F]{40}$'
+		  AND e.timestamp >= $2
+	`
+
+	args := []interface{}{
+		query.ContractAddress,
+		time.Now().Add(-window),
+	}
+
+	argIndex := 3
+	if query.EventName != nil {
+		topQuery += fmt.Sprintf(" AND e.event_name = $%d", argIndex)
+		args = append(args, *query.EventName)
+		argIndex++
+	}
+
+	topQuery += fmt.Sprintf(" GROUP BY address ORDER BY total DESC LIMIT $%d", argIndex)
+	args = append(args, limit)
+
+	rows, err := qb.executeRows(ctx, "aggregate.top", topQuery, args)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []*types.TopAddressStat
+	for rows.Next() {
+		var stat types.TopAddressStat
+		if err := rows.Scan(&stat.Address, &stat.EventCount); err != nil {
+			return nil, err
+		}
+		results = append(results, &stat)
+	}
+
+	return results, rows.Err()
 }
 
 // buildEventWhereClause builds the WHERE clause for event queries
@@ -324,4 +539,133 @@ func (qb *QueryBuilder) getLimit(first, last *int32, defaultLimit int32) int32 {
 		return *last
 	}
 	return defaultLimit
+}
+
+func (qb *QueryBuilder) buildLimitClause(first, last *int32, limit, offset int32, startIndex int) (string, []interface{}) {
+	maxLimit := int32(qb.config.DefaultLimit)
+	if maxLimit == 0 {
+		maxLimit = 25
+	}
+
+	calculated := qb.getLimit(first, last, maxLimit)
+	if limit > 0 && (calculated == 0 || limit < calculated) {
+		calculated = limit
+	}
+	if qb.config.MaxQueryLimit > 0 && calculated > int32(qb.config.MaxQueryLimit) {
+		calculated = int32(qb.config.MaxQueryLimit)
+	}
+	if calculated <= 0 {
+		calculated = maxLimit
+	}
+
+	clause := fmt.Sprintf(" LIMIT $%d", startIndex)
+	args := []interface{}{calculated}
+
+	if offset > 0 {
+		clause += fmt.Sprintf(" OFFSET $%d", startIndex+1)
+		args = append(args, offset)
+	}
+
+	return clause, args
+}
+
+func (qb *QueryBuilder) executeRows(ctx context.Context, label string, queryStr string, args []interface{}) (*sql.Rows, error) {
+	start := time.Now()
+	rows, err := qb.db.QueryContext(ctx, queryStr, args...)
+	qb.observeQuery(label, queryStr, args, start, err)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (qb *QueryBuilder) queryRow(ctx context.Context, label string, queryStr string, args []interface{}, dest interface{}) error {
+	start := time.Now()
+	err := qb.db.QueryRowContext(ctx, queryStr, args...).Scan(dest)
+	qb.observeQuery(label, queryStr, args, start, err)
+	return err
+}
+
+func (qb *QueryBuilder) buildAddressClause(address string, startIndex int) (string, []interface{}) {
+	fields := []string{"from", "to", "owner", "spender"}
+	var conditions []string
+	args := make([]interface{}, 0, len(fields))
+	idx := startIndex
+
+	for _, field := range fields {
+		conditions = append(conditions, fmt.Sprintf("e.args @> $%d", idx))
+		args = append(args, fmt.Sprintf(`{"%s": "%s"}`, field, address))
+		idx++
+	}
+
+	// Fallback generic contains check using ilike on JSON text
+	conditions = append(conditions, fmt.Sprintf("encode(e.args::bytea, 'escape') ILIKE $%d", idx))
+	args = append(args, fmt.Sprintf("%%%s%%", strings.TrimPrefix(strings.ToLower(address), "0x")))
+
+	return "(" + strings.Join(conditions, " OR ") + ")", args
+}
+
+func (qb *QueryBuilder) observeQuery(label, queryStr string, args []interface{}, start time.Time, err error) {
+	duration := time.Since(start)
+	if err != nil && err != sql.ErrNoRows {
+		qb.logger.Error("Query execution failed", "label", label, "error", err, "duration", duration)
+		return
+	}
+
+	if qb.config == nil || qb.config.SlowQueryThreshold <= 0 || duration <= qb.config.SlowQueryThreshold {
+		return
+	}
+
+	qb.logSlowQuery(label, queryStr, args, duration)
+}
+
+func (qb *QueryBuilder) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if qb.config == nil || qb.config.QueryTimeout <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, qb.config.QueryTimeout)
+}
+
+func (qb *QueryBuilder) logSlowQuery(label, queryStr string, args []interface{}, duration time.Duration) {
+	qb.logger.Warn("Slow SQL detected", "label", label, "duration", duration)
+	if !qb.shouldExplain() {
+		return
+	}
+
+	if plan, err := qb.captureExplain(queryStr, args); err == nil {
+		qb.logger.Info("Query plan", "label", label, "plan", plan)
+	} else {
+		qb.logger.Warn("Failed to capture query plan", "label", label, "error", err)
+	}
+}
+
+func (qb *QueryBuilder) captureExplain(queryStr string, args []interface{}) (string, error) {
+	if qb.config == nil {
+		return "", fmt.Errorf("config not initialized")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), qb.config.QueryTimeout)
+	defer cancel()
+
+	rows, err := qb.db.QueryContext(ctx, "EXPLAIN (FORMAT JSON) "+queryStr, args...)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	var plan string
+	for rows.Next() {
+		if err := rows.Scan(&plan); err != nil {
+			return "", err
+		}
+	}
+
+	return plan, rows.Err()
+}
+
+func (qb *QueryBuilder) shouldExplain() bool {
+	if qb.config == nil || qb.config.ExplainPlanSample <= 0 {
+		return false
+	}
+	return rand.Intn(qb.config.ExplainPlanSample) == 0
 }
