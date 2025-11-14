@@ -2,7 +2,6 @@ package handler
 
 import (
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -10,6 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/smart-contract-event-indexer/api-gateway/internal/config"
 	"github.com/smart-contract-event-indexer/shared/models"
+	protoapi "github.com/smart-contract-event-indexer/shared/proto"
 	"github.com/smart-contract-event-indexer/shared/utils"
 )
 
@@ -17,6 +17,7 @@ import (
 type EventHandler struct {
 	db          *sql.DB
 	redisClient *redis.Client
+	queryClient protoapi.QueryServiceClient
 	logger      utils.Logger
 	config      *config.Config
 }
@@ -25,12 +26,14 @@ type EventHandler struct {
 func NewEventHandler(
 	db *sql.DB,
 	redisClient *redis.Client,
+	queryClient protoapi.QueryServiceClient,
 	logger utils.Logger,
 	cfg *config.Config,
 ) *EventHandler {
 	return &EventHandler{
 		db:          db,
 		redisClient: redisClient,
+		queryClient: queryClient,
 		logger:      logger,
 		config:      cfg,
 	}
@@ -38,138 +41,51 @@ func NewEventHandler(
 
 // GetEvents handles GET /api/v1/events
 func (h *EventHandler) GetEvents(c *gin.Context) {
-	// Parse query parameters
-	contractAddress := c.Query("contract")
-	eventName := c.Query("event_name")
-	fromBlockStr := c.Query("from_block")
-	toBlockStr := c.Query("to_block")
-	limitStr := c.Query("limit")
-	offsetStr := c.Query("offset")
+	req := &protoapi.EventQuery{}
 
-	// Build query
-	query := "SELECT id, contract_address, event_name, block_number, block_hash, transaction_hash, transaction_index, log_index, args, timestamp, created_at FROM events WHERE 1=1"
-	args := []interface{}{}
-	argIndex := 1
-
-	if contractAddress != "" {
-		query += " AND contract_address = $" + strconv.Itoa(argIndex)
-		args = append(args, contractAddress)
-		argIndex++
+	if v := c.Query("contract"); v != "" {
+		req.ContractAddress = v
 	}
-
-	if eventName != "" {
-		query += " AND event_name = $" + strconv.Itoa(argIndex)
-		args = append(args, eventName)
-		argIndex++
+	if v := c.Query("event_name"); v != "" {
+		req.EventName = v
 	}
-
-	if fromBlockStr != "" {
-		if fromBlock, err := strconv.ParseInt(fromBlockStr, 10, 64); err == nil {
-			query += " AND block_number >= $" + strconv.Itoa(argIndex)
-			args = append(args, fromBlock)
-			argIndex++
+	if v := c.Query("from_block"); v != "" {
+		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
+			req.FromBlock = parsed
+		}
+	}
+	if v := c.Query("to_block"); v != "" {
+		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
+			req.ToBlock = parsed
 		}
 	}
 
-	if toBlockStr != "" {
-		if toBlock, err := strconv.ParseInt(toBlockStr, 10, 64); err == nil {
-			query += " AND block_number <= $" + strconv.Itoa(argIndex)
-			args = append(args, toBlock)
-			argIndex++
-		}
-	}
-
-	// Add ordering
-	query += " ORDER BY block_number DESC, log_index ASC"
-
-	// Add pagination
 	limit := h.config.DefaultLimit
-	if limitStr != "" {
-		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 && parsedLimit <= h.config.MaxQueryLimit {
-			limit = parsedLimit
+	if v := c.Query("limit"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= h.config.MaxQueryLimit {
+			limit = parsed
 		}
 	}
-
 	offset := 0
-	if offsetStr != "" {
-		if parsedOffset, err := strconv.Atoi(offsetStr); err == nil && parsedOffset >= 0 {
-			offset = parsedOffset
+	if v := c.Query("offset"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+			offset = parsed
 		}
 	}
+	req.Limit = int32(limit)
+	req.Offset = int32(offset)
 
-	query += " LIMIT $" + strconv.Itoa(argIndex) + " OFFSET $" + strconv.Itoa(argIndex+1)
-	args = append(args, limit, offset)
-
-	// Execute query
-	rows, err := h.db.Query(query, args...)
+	ctx := c.Request.Context()
+	resp, err := h.queryClient.GetEvents(ctx, req)
 	if err != nil {
-		h.logger.Error("Failed to query events", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query events"})
+		h.logger.WithError(err).Error("Failed to fetch events via query service")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch events"})
 		return
 	}
-	defer rows.Close()
 
-	// Parse results
-	var events []models.Event
-	for rows.Next() {
-		var event models.Event
-		var argsJSON string
-
-		err := rows.Scan(
-			&event.ID,
-			&event.ContractAddress,
-			&event.EventName,
-			&event.BlockNumber,
-			&event.BlockHash,
-			&event.TransactionHash,
-			&event.TransactionIndex,
-			&event.LogIndex,
-			&argsJSON,
-			&event.Timestamp,
-			&event.CreatedAt,
-		)
-		if err != nil {
-			h.logger.Error("Failed to scan event", "error", err)
-			continue
-		}
-
-		// Parse JSONB args
-		if err := json.Unmarshal([]byte(argsJSON), &event.Args); err != nil {
-			h.logger.Warn("Failed to parse event args", "error", err)
-			event.Args = models.JSONB{}
-		}
-
-		events = append(events, event)
-	}
-
-	// Get total count
-	countQuery := "SELECT COUNT(*) FROM events WHERE 1=1"
-	countArgs := args[:len(args)-2] // Remove limit and offset
-	if len(countArgs) > 0 {
-		countQuery = "SELECT COUNT(*) FROM events WHERE 1=1"
-		for i := range countArgs {
-			if i == 0 {
-				countQuery += " AND contract_address = $1"
-			} else if i == 1 {
-				countQuery += " AND event_name = $2"
-			} else if i == 2 {
-				countQuery += " AND block_number >= $3"
-			} else if i == 3 {
-				countQuery += " AND block_number <= $4"
-			}
-		}
-	}
-
-	var totalCount int64
-	if err := h.db.QueryRow(countQuery, countArgs...).Scan(&totalCount); err != nil {
-		h.logger.Warn("Failed to get total count", "error", err)
-		totalCount = int64(len(events))
-	}
-
-	// Return response
 	c.JSON(http.StatusOK, gin.H{
-		"events":      events,
-		"total_count": totalCount,
+		"events":      restEventsFromProto(resp.Events),
+		"total_count": resp.TotalCount,
 		"limit":       limit,
 		"offset":      offset,
 	})
@@ -183,54 +99,16 @@ func (h *EventHandler) GetEventsByTransaction(c *gin.Context) {
 		return
 	}
 
-	query := `
-		SELECT id, contract_address, event_name, block_number, block_hash, 
-		       transaction_hash, transaction_index, log_index, args, timestamp, created_at 
-		FROM events 
-		WHERE transaction_hash = $1 
-		ORDER BY log_index ASC
-	`
-
-	rows, err := h.db.Query(query, txHash)
+	resp, err := h.queryClient.GetEventsByTransaction(c.Request.Context(), &protoapi.TransactionQuery{
+		TransactionHash: txHash,
+	})
 	if err != nil {
-		h.logger.Error("Failed to query events by transaction", "error", err)
+		h.logger.WithError(err).Error("Failed to fetch events by transaction")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query events"})
 		return
 	}
-	defer rows.Close()
 
-	var events []models.Event
-	for rows.Next() {
-		var event models.Event
-		var argsJSON string
-
-		err := rows.Scan(
-			&event.ID,
-			&event.ContractAddress,
-			&event.EventName,
-			&event.BlockNumber,
-			&event.BlockHash,
-			&event.TransactionHash,
-			&event.TransactionIndex,
-			&event.LogIndex,
-			&argsJSON,
-			&event.Timestamp,
-			&event.CreatedAt,
-		)
-		if err != nil {
-			h.logger.Error("Failed to scan event", "error", err)
-			continue
-		}
-
-		// Parse JSONB args
-		if err := json.Unmarshal([]byte(argsJSON), &event.Args); err != nil {
-			h.logger.Warn("Failed to parse event args", "error", err)
-			event.Args = models.JSONB{}
-		}
-
-		events = append(events, event)
-	}
-
+	events := restEventsFromProto(resp.Events)
 	c.JSON(http.StatusOK, gin.H{
 		"events":      events,
 		"total_count": len(events),
@@ -245,16 +123,6 @@ func (h *EventHandler) GetEventsByAddress(c *gin.Context) {
 		return
 	}
 
-	// Use JSONB query to find events involving this address
-	query := `
-		SELECT id, contract_address, event_name, block_number, block_hash, 
-		       transaction_hash, transaction_index, log_index, args, timestamp, created_at 
-		FROM events 
-		WHERE args @> $1 
-		ORDER BY block_number DESC, log_index ASC
-		LIMIT $2
-	`
-
 	limit := h.config.DefaultLimit
 	limitStr := c.Query("limit")
 	if limitStr != "" {
@@ -263,52 +131,62 @@ func (h *EventHandler) GetEventsByAddress(c *gin.Context) {
 		}
 	}
 
-	// Search for address in 'from' field (simplified)
-	addressFilter := `{"from": "` + address + `"}`
-
-	rows, err := h.db.Query(query, addressFilter, limit)
+	resp, err := h.queryClient.GetEventsByAddress(c.Request.Context(), &protoapi.AddressQuery{
+		Address: address,
+		First:   int32(limit),
+	})
 	if err != nil {
-		h.logger.Error("Failed to query events by address", "error", err)
+		h.logger.WithError(err).Error("Failed to fetch events by address")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query events"})
 		return
 	}
-	defer rows.Close()
 
-	var events []models.Event
-	for rows.Next() {
-		var event models.Event
-		var argsJSON string
-
-		err := rows.Scan(
-			&event.ID,
-			&event.ContractAddress,
-			&event.EventName,
-			&event.BlockNumber,
-			&event.BlockHash,
-			&event.TransactionHash,
-			&event.TransactionIndex,
-			&event.LogIndex,
-			&argsJSON,
-			&event.Timestamp,
-			&event.CreatedAt,
-		)
-		if err != nil {
-			h.logger.Error("Failed to scan event", "error", err)
-			continue
-		}
-
-		// Parse JSONB args
-		if err := json.Unmarshal([]byte(argsJSON), &event.Args); err != nil {
-			h.logger.Warn("Failed to parse event args", "error", err)
-			event.Args = models.JSONB{}
-		}
-
-		events = append(events, event)
-	}
-
+	events := restEventsFromProto(resp.Events)
 	c.JSON(http.StatusOK, gin.H{
 		"events":      events,
 		"total_count": len(events),
 		"address":     address,
 	})
+}
+
+func restEventsFromProto(evts []*protoapi.Event) []models.Event {
+	results := make([]models.Event, 0, len(evts))
+	for _, evt := range evts {
+		if evt == nil {
+			continue
+		}
+		event := models.Event{
+			ID:               evt.Id,
+			ContractAddress:  models.Address(evt.ContractAddress),
+			EventName:        evt.EventName,
+			BlockNumber:      evt.BlockNumber,
+			BlockHash:        models.Hash(evt.BlockHash),
+			TransactionHash:  models.Hash(evt.TransactionHash),
+			TransactionIndex: int(evt.TransactionIndex),
+			LogIndex:         int(evt.LogIndex),
+			Args:             argsMapFromProto(evt.Args),
+		}
+		if evt.Timestamp != nil {
+			event.Timestamp = evt.Timestamp.AsTime()
+		}
+		if evt.CreatedAt != nil {
+			event.CreatedAt = evt.CreatedAt.AsTime()
+		}
+		results = append(results, event)
+	}
+	return results
+}
+
+func argsMapFromProto(args []*protoapi.EventArg) models.JSONB {
+	if len(args) == 0 {
+		return models.JSONB{}
+	}
+	result := make(models.JSONB)
+	for _, arg := range args {
+		if arg == nil {
+			continue
+		}
+		result[arg.Key] = arg.Value
+	}
+	return result
 }

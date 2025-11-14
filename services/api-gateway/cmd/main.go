@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/smart-contract-event-indexer/api-gateway/internal/config"
+	"github.com/smart-contract-event-indexer/api-gateway/internal/grpcclient"
 	"github.com/smart-contract-event-indexer/api-gateway/internal/server"
 	sharedconfig "github.com/smart-contract-event-indexer/shared/config"
 	"github.com/smart-contract-event-indexer/shared/database"
@@ -57,8 +58,22 @@ func main() {
 	}
 	defer redisClient.Close()
 
+	// Dial gRPC dependencies
+	clients, err := grpcclient.NewClients(cfg, logger)
+	if err != nil {
+		logger.Fatalf("Failed to connect to gRPC services: %v", err)
+	}
+	defer clients.Close()
+
 	// Create and start HTTP server
-	httpServer := server.NewHTTPServer(db.DB, redisClient.Client, logger, cfg)
+	httpServer := server.NewHTTPServer(
+		db.DB,
+		redisClient.Client,
+		clients.Query,
+		clients.Admin,
+		logger,
+		cfg,
+	)
 
 	// Start server in a goroutine
 	go func() {

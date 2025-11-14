@@ -10,13 +10,18 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/smart-contract-event-indexer/api-gateway/internal/config"
 	"github.com/smart-contract-event-indexer/shared/models"
+	protoapi "github.com/smart-contract-event-indexer/shared/proto"
 	"github.com/smart-contract-event-indexer/shared/utils"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // ContractHandler handles contract-related HTTP requests
 type ContractHandler struct {
 	db          *sql.DB
 	redisClient *redis.Client
+	adminClient protoapi.AdminServiceClient
+	queryClient protoapi.QueryServiceClient
 	logger      utils.Logger
 	config      *config.Config
 }
@@ -25,12 +30,16 @@ type ContractHandler struct {
 func NewContractHandler(
 	db *sql.DB,
 	redisClient *redis.Client,
+	adminClient protoapi.AdminServiceClient,
+	queryClient protoapi.QueryServiceClient,
 	logger utils.Logger,
 	cfg *config.Config,
 ) *ContractHandler {
 	return &ContractHandler{
 		db:          db,
 		redisClient: redisClient,
+		adminClient: adminClient,
+		queryClient: queryClient,
 		logger:      logger,
 		config:      cfg,
 	}
@@ -47,83 +56,33 @@ type AddContractRequest struct {
 
 // GetContracts handles GET /api/v1/contracts
 func (h *ContractHandler) GetContracts(c *gin.Context) {
-	query := "SELECT id, address, name, abi, start_block, current_block, confirm_blocks, created_at, updated_at FROM contracts"
-	args := []interface{}{}
-	argIndex := 1
-
-	// Note: is_active column doesn't exist in current schema
-	// Filtering by active status is not available in current implementation
-
-	query += " ORDER BY created_at DESC"
-
-	// Add pagination
-	limitStr := c.Query("limit")
-	offsetStr := c.Query("offset")
-	limit := 20
+	limit := h.config.DefaultLimit
 	offset := 0
 
-	if limitStr != "" {
-		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
-			limit = parsedLimit
+	if v := c.Query("limit"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if v := c.Query("offset"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+			offset = parsed
 		}
 	}
 
-	if offsetStr != "" {
-		if parsedOffset, err := strconv.Atoi(offsetStr); err == nil && parsedOffset >= 0 {
-			offset = parsedOffset
-		}
-	}
-
-	query += " LIMIT $" + strconv.Itoa(argIndex) + " OFFSET $" + strconv.Itoa(argIndex+1)
-	args = append(args, limit, offset)
-
-	// Debug logging
-	h.logger.Info("Executing query", "query", query, "args", args)
-
-	rows, err := h.db.Query(query, args...)
+	resp, err := h.adminClient.ListContracts(c.Request.Context(), &protoapi.ListContractsRequest{
+		Limit:  int32(limit),
+		Offset: int32(offset),
+	})
 	if err != nil {
-		h.logger.Error("Failed to query contracts", "error", err)
+		h.logger.WithError(err).Error("Failed to list contracts via admin service")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query contracts"})
 		return
 	}
-	defer rows.Close()
-
-	var contracts []models.Contract
-	for rows.Next() {
-		var contract models.Contract
-
-		err := rows.Scan(
-			&contract.ID,
-			&contract.Address,
-			&contract.Name,
-			&contract.ABI,
-			&contract.StartBlock,
-			&contract.CurrentBlock,
-			&contract.ConfirmBlocks,
-			&contract.CreatedAt,
-			&contract.UpdatedAt,
-		)
-		if err != nil {
-			h.logger.Error("Failed to scan contract", "error", err)
-			continue
-		}
-
-		contracts = append(contracts, contract)
-	}
-
-	// Get total count
-	countQuery := "SELECT COUNT(*) FROM contracts"
-	countArgs := args[:len(args)-2] // Remove limit and offset
-
-	var totalCount int64
-	if err := h.db.QueryRow(countQuery, countArgs...).Scan(&totalCount); err != nil {
-		h.logger.Warn("Failed to get total count", "error", err)
-		totalCount = int64(len(contracts))
-	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"contracts":   contracts,
-		"total_count": totalCount,
+		"contracts":   restContractsFromProto(resp.Contracts),
+		"total_count": resp.TotalCount,
 		"limit":       limit,
 		"offset":      offset,
 	})
@@ -153,14 +112,14 @@ func (h *ContractHandler) AddContract(c *gin.Context) {
 	var existingID int32
 	checkQuery := "SELECT id FROM contracts WHERE address = $1"
 	err := h.db.QueryRow(checkQuery, req.Address).Scan(&existingID)
-	
+
 	if err == nil {
 		// Contract exists, return existing contract info
 		c.JSON(http.StatusOK, gin.H{
-			"success":    true,
+			"success":     true,
 			"contract_id": existingID,
-			"is_new":     false,
-			"message":    "Contract already exists",
+			"is_new":      false,
+			"message":     "Contract already exists",
 		})
 		return
 	} else if err != sql.ErrNoRows {
@@ -176,40 +135,29 @@ func (h *ContractHandler) AddContract(c *gin.Context) {
 		return
 	}
 
-	// Insert new contract
-	insertQuery := `
-		INSERT INTO contracts (address, name, abi, start_block, current_block, confirm_blocks, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id
-	`
-
-	var contractID int32
-	err = h.db.QueryRow(
-		insertQuery,
-		req.Address,
-		req.Name,
-		req.ABI,
-		req.StartBlock,
-		req.StartBlock, // current_block starts at start_block
-		req.ConfirmBlocks,
-		models.Now(),
-		models.Now(),
-	).Scan(&contractID)
-
+	resp, err := h.adminClient.AddContract(c.Request.Context(), &protoapi.AddContractRequest{
+		Address:       req.Address,
+		Abi:           req.ABI,
+		Name:          req.Name,
+		StartBlock:    req.StartBlock,
+		ConfirmBlocks: req.ConfirmBlocks,
+	})
 	if err != nil {
-		h.logger.Error("Failed to insert contract", "error", err)
+		h.logger.WithError(err).Error("Failed to add contract via admin service")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create contract"})
 		return
 	}
 
-	h.logger.Info("Contract added", "address", req.Address, "id", contractID)
+	payload := gin.H{
+		"success": resp.Success,
+		"is_new":  resp.IsNew,
+		"message": resp.Message,
+	}
+	if resp.Contract != nil {
+		payload["contract"] = restContractFromProto(resp.Contract)
+	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"success":     true,
-		"contract_id": contractID,
-		"is_new":      true,
-		"message":     "Contract added successfully",
-	})
+	c.JSON(http.StatusCreated, payload)
 }
 
 // GetContract handles GET /api/v1/contracts/:address
@@ -220,37 +168,21 @@ func (h *ContractHandler) GetContract(c *gin.Context) {
 		return
 	}
 
-	query := `
-		SELECT id, address, name, abi, start_block, current_block, confirm_blocks, created_at, updated_at
-		FROM contracts 
-		WHERE address = $1
-	`
-
-	var contract models.Contract
-	err := h.db.QueryRow(query, address).Scan(
-		&contract.ID,
-		&contract.Address,
-		&contract.Name,
-		&contract.ABI,
-		&contract.StartBlock,
-		&contract.CurrentBlock,
-		&contract.ConfirmBlocks,
-		&contract.CreatedAt,
-		&contract.UpdatedAt,
-	)
-
-	if err == sql.ErrNoRows {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Contract not found"})
-		return
-	} else if err != nil {
-		h.logger.Error("Failed to query contract", "error", err)
+	resp, err := h.adminClient.GetContract(c.Request.Context(), &protoapi.GetContractRequest{
+		Address: address,
+	})
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Contract not found"})
+			return
+		}
+		h.logger.WithError(err).Error("Failed to fetch contract")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query contract"})
 		return
 	}
 
-
 	c.JSON(http.StatusOK, gin.H{
-		"contract": contract,
+		"contract": restContractFromProto(resp),
 	})
 }
 
@@ -262,32 +194,23 @@ func (h *ContractHandler) RemoveContract(c *gin.Context) {
 		return
 	}
 
-	// Delete contract (no is_active column in current schema)
-	query := "DELETE FROM contracts WHERE address = $1"
-	result, err := h.db.Exec(query, address)
+	resp, err := h.adminClient.RemoveContract(c.Request.Context(), &protoapi.RemoveContractRequest{
+		Address: address,
+	})
 	if err != nil {
-		h.logger.Error("Failed to remove contract", "error", err)
+		h.logger.WithError(err).Error("Failed to remove contract")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove contract"})
 		return
 	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		h.logger.Error("Failed to get rows affected", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove contract"})
+	if !resp.Success {
+		c.JSON(http.StatusNotFound, gin.H{"error": resp.Message})
 		return
 	}
-
-	if rowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Contract not found"})
-		return
-	}
-
-	h.logger.Info("Contract removed", "address", address)
 
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Contract removed successfully",
+		"success": resp.Success,
+		"message": resp.Message,
 	})
 }
 
@@ -299,39 +222,51 @@ func (h *ContractHandler) GetContractStats(c *gin.Context) {
 		return
 	}
 
-	// Get total events count
-	var totalEvents int64
-	countQuery := "SELECT COUNT(*) FROM events WHERE contract_address = $1"
-	if err := h.db.QueryRow(countQuery, address).Scan(&totalEvents); err != nil {
-		h.logger.Error("Failed to get total events", "error", err)
+	stats, err := h.queryClient.GetContractStats(c.Request.Context(), &protoapi.StatsQuery{
+		ContractAddress: address,
+	})
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to fetch contract stats")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get statistics"})
 		return
 	}
 
-	// Get latest block
-	var latestBlock int64
-	latestQuery := "SELECT MAX(block_number) FROM events WHERE contract_address = $1"
-	if err := h.db.QueryRow(latestQuery, address).Scan(&latestBlock); err != nil {
-		h.logger.Error("Failed to get latest block", "error", err)
-		latestBlock = 0
-	}
-
-	// Get current block from contract
-	var currentBlock int64
-	currentQuery := "SELECT current_block FROM contracts WHERE address = $1"
-	if err := h.db.QueryRow(currentQuery, address).Scan(&currentBlock); err != nil {
-		h.logger.Error("Failed to get current block", "error", err)
-		currentBlock = latestBlock
-	}
-
-	// Calculate indexer delay (simplified)
-	indexerDelay := int64(0) // This would be calculated based on current time vs block timestamp
-
 	c.JSON(http.StatusOK, gin.H{
-		"contract_address": address,
-		"total_events":     totalEvents,
-		"latest_block":     latestBlock,
-		"current_block":    currentBlock,
-		"indexer_delay":    indexerDelay,
+		"contract_address": stats.ContractAddress,
+		"total_events":     stats.TotalEvents,
+		"latest_block":     stats.LatestBlock,
+		"current_block":    stats.CurrentBlock,
+		"indexer_delay":    stats.IndexerDelay,
 	})
+}
+
+func restContractFromProto(contract *protoapi.Contract) models.Contract {
+	if contract == nil {
+		return models.Contract{}
+	}
+	result := models.Contract{
+		ID:            contract.Id,
+		Address:       models.Address(contract.Address),
+		ABI:           contract.Abi,
+		Name:          contract.Name,
+		StartBlock:    contract.StartBlock,
+		CurrentBlock:  contract.CurrentBlock,
+		ConfirmBlocks: int(contract.ConfirmBlocks),
+	}
+	if contract.CreatedAt != nil {
+		result.CreatedAt = contract.CreatedAt.AsTime()
+	}
+	if contract.UpdatedAt != nil {
+		result.UpdatedAt = contract.UpdatedAt.AsTime()
+	}
+
+	return result
+}
+
+func restContractsFromProto(list []*protoapi.Contract) []models.Contract {
+	results := make([]models.Contract, 0, len(list))
+	for _, contract := range list {
+		results = append(results, restContractFromProto(contract))
+	}
+	return results
 }

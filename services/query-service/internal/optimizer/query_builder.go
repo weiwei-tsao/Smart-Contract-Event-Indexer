@@ -46,10 +46,16 @@ func (qb *QueryBuilder) BuildEventQuery(ctx context.Context, query *types.EventQ
 	// Add ORDER BY
 	queryStr += " ORDER BY e.block_number DESC, e.log_index ASC"
 
-	// Add LIMIT
+	// Add LIMIT/OFFSET
 	limit := qb.getLimit(query.First, query.Last, 20)
+	if query.Limit > 0 {
+		limit = query.Limit
+	}
 	if limit > 0 {
 		queryStr += fmt.Sprintf(" LIMIT %d", limit)
+	}
+	if query.Offset > 0 {
+		queryStr += fmt.Sprintf(" OFFSET %d", query.Offset)
 	}
 
 	// Execute query
@@ -104,10 +110,16 @@ func (qb *QueryBuilder) BuildAddressQuery(ctx context.Context, query *types.Addr
 	// Add ORDER BY
 	baseQuery += " ORDER BY e.block_number DESC, e.log_index ASC"
 
-	// Add LIMIT
+	// Add LIMIT/OFFSET
 	limit := qb.getLimit(query.First, query.Last, 20)
+	if query.Limit > 0 {
+		limit = query.Limit
+	}
 	if limit > 0 {
 		baseQuery += fmt.Sprintf(" LIMIT %d", limit)
+	}
+	if query.Offset > 0 {
+		baseQuery += fmt.Sprintf(" OFFSET %d", query.Offset)
 	}
 
 	// Execute query

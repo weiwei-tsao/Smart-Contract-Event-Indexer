@@ -6,11 +6,16 @@ import (
 	"net/http"
 	"time"
 
+	gqlhandler "github.com/99designs/gqlgen/graphql/handler"
+	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"github.com/smart-contract-event-indexer/api-gateway/graph"
+	"github.com/smart-contract-event-indexer/api-gateway/graph/generated"
 	"github.com/smart-contract-event-indexer/api-gateway/internal/config"
 	"github.com/smart-contract-event-indexer/api-gateway/internal/handler"
 	"github.com/smart-contract-event-indexer/api-gateway/internal/middleware"
+	protoapi "github.com/smart-contract-event-indexer/shared/proto"
 	"github.com/smart-contract-event-indexer/shared/utils"
 )
 
@@ -24,6 +29,8 @@ type HTTPServer struct {
 func NewHTTPServer(
 	db *sql.DB,
 	redisClient *redis.Client,
+	queryClient protoapi.QueryServiceClient,
+	adminClient protoapi.AdminServiceClient,
 	logger utils.Logger,
 	cfg *config.Config,
 ) *http.Server {
@@ -41,11 +48,25 @@ func NewHTTPServer(
 	router.Use(middleware.Logger(logger))
 	router.Use(middleware.Recovery(logger))
 	router.Use(middleware.CORS(cfg.CORSOrigins))
+	router.Use(middleware.RateLimiter(redisClient, cfg.RateLimitFreeTier, time.Minute))
 
 	// Create handlers
-	eventHandler := handler.NewEventHandler(db, redisClient, logger, cfg)
-	contractHandler := handler.NewContractHandler(db, redisClient, logger, cfg)
+	eventHandler := handler.NewEventHandler(db, redisClient, queryClient, logger, cfg)
+	contractHandler := handler.NewContractHandler(db, redisClient, adminClient, queryClient, logger, cfg)
 	healthHandler := handler.NewHealthHandler(db, redisClient, logger)
+
+	// GraphQL resolver
+	resolver := &graph.Resolver{
+		DB:          db,
+		Redis:       redisClient,
+		QueryClient: queryClient,
+		AdminClient: adminClient,
+		Logger:      logger,
+		Config:      cfg,
+	}
+	gqlServer := gqlhandler.NewDefaultServer(
+		generated.NewExecutableSchema(generated.Config{Resolvers: resolver}),
+	)
 
 	// API routes
 	api := router.Group("/api/v1")
@@ -72,18 +93,15 @@ func NewHTTPServer(
 		api.GET("/health", healthHandler.HealthCheck)
 	}
 
-	// GraphQL endpoint (placeholder)
+	// GraphQL endpoints
 	router.POST("/graphql", func(c *gin.Context) {
-		c.JSON(http.StatusNotImplemented, gin.H{
-			"error": "GraphQL endpoint not implemented yet",
-		})
+		gqlServer.ServeHTTP(c.Writer, c.Request)
 	})
-
-	// GraphQL Playground (placeholder)
+	router.GET("/graphql", func(c *gin.Context) {
+		gqlServer.ServeHTTP(c.Writer, c.Request)
+	})
 	router.GET("/playground", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "playground.html", gin.H{
-			"title": "GraphQL Playground",
-		})
+		playground.Handler("GraphQL Playground", "/graphql").ServeHTTP(c.Writer, c.Request)
 	})
 
 	// Create HTTP server

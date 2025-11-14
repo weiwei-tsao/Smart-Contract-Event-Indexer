@@ -6,181 +6,354 @@ package graph
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/smart-contract-event-indexer/api-gateway/graph/generated"
 	"github.com/smart-contract-event-indexer/api-gateway/graph/model"
 	"github.com/smart-contract-event-indexer/shared/models"
+	protoapi "github.com/smart-contract-event-indexer/shared/proto"
 )
 
 // ID is the resolver for the id field.
 func (r *contractResolver) ID(ctx context.Context, obj *models.Contract) (string, error) {
-	panic(fmt.Errorf("not implemented: ID - id"))
+	return fmt.Sprintf("%d", obj.ID), nil
 }
 
 // StartBlock is the resolver for the startBlock field.
 func (r *contractResolver) StartBlock(ctx context.Context, obj *models.Contract) (models.BigInt, error) {
-	panic(fmt.Errorf("not implemented: StartBlock - startBlock"))
+	return models.BigInt(fmt.Sprintf("%d", obj.StartBlock)), nil
 }
 
 // CurrentBlock is the resolver for the currentBlock field.
 func (r *contractResolver) CurrentBlock(ctx context.Context, obj *models.Contract) (models.BigInt, error) {
-	panic(fmt.Errorf("not implemented: CurrentBlock - currentBlock"))
+	return models.BigInt(fmt.Sprintf("%d", obj.CurrentBlock)), nil
 }
 
 // IsActive is the resolver for the isActive field.
 func (r *contractResolver) IsActive(ctx context.Context, obj *models.Contract) (bool, error) {
-	panic(fmt.Errorf("not implemented: IsActive - isActive"))
+	// All registered contracts are considered active until paused (feature TBD).
+	return true, nil
 }
 
 // CreatedAt is the resolver for the createdAt field.
 func (r *contractResolver) CreatedAt(ctx context.Context, obj *models.Contract) (*models.Timestamp, error) {
-	panic(fmt.Errorf("not implemented: CreatedAt - createdAt"))
+	return toTimestampPtr(obj.CreatedAt), nil
 }
 
 // UpdatedAt is the resolver for the updatedAt field.
 func (r *contractResolver) UpdatedAt(ctx context.Context, obj *models.Contract) (*models.Timestamp, error) {
-	panic(fmt.Errorf("not implemented: UpdatedAt - updatedAt"))
+	return toTimestampPtr(obj.UpdatedAt), nil
 }
 
 // LatestBlock is the resolver for the latestBlock field.
 func (r *contractStatsResolver) LatestBlock(ctx context.Context, obj *models.ContractStats) (models.BigInt, error) {
-	panic(fmt.Errorf("not implemented: LatestBlock - latestBlock"))
+	return models.BigInt(fmt.Sprintf("%d", obj.LatestBlock)), nil
 }
 
 // UniqueAddresses is the resolver for the uniqueAddresses field.
 func (r *contractStatsResolver) UniqueAddresses(ctx context.Context, obj *models.ContractStats) (*int, error) {
-	panic(fmt.Errorf("not implemented: UniqueAddresses - uniqueAddresses"))
+	return nil, nil
 }
 
 // LastIndexedAt is the resolver for the lastIndexedAt field.
 func (r *contractStatsResolver) LastIndexedAt(ctx context.Context, obj *models.ContractStats) (*models.Timestamp, error) {
-	panic(fmt.Errorf("not implemented: LastIndexedAt - lastIndexedAt"))
+	return toTimestampPtr(obj.LastUpdated), nil
 }
 
 // ID is the resolver for the id field.
 func (r *eventResolver) ID(ctx context.Context, obj *models.Event) (string, error) {
-	panic(fmt.Errorf("not implemented: ID - id"))
+	return fmt.Sprintf("%d", obj.ID), nil
 }
 
 // BlockNumber is the resolver for the blockNumber field.
 func (r *eventResolver) BlockNumber(ctx context.Context, obj *models.Event) (models.BigInt, error) {
-	panic(fmt.Errorf("not implemented: BlockNumber - blockNumber"))
+	return models.BigInt(fmt.Sprintf("%d", obj.BlockNumber)), nil
 }
 
 // BlockTimestamp is the resolver for the blockTimestamp field.
 func (r *eventResolver) BlockTimestamp(ctx context.Context, obj *models.Event) (*models.Timestamp, error) {
-	panic(fmt.Errorf("not implemented: BlockTimestamp - blockTimestamp"))
+	return toTimestampPtr(obj.Timestamp), nil
 }
 
 // TransactionHash is the resolver for the transactionHash field.
 func (r *eventResolver) TransactionHash(ctx context.Context, obj *models.Event) (string, error) {
-	panic(fmt.Errorf("not implemented: TransactionHash - transactionHash"))
+	return string(obj.TransactionHash), nil
 }
 
 // Args is the resolver for the args field.
 func (r *eventResolver) Args(ctx context.Context, obj *models.Event) ([]*models.EventArg, error) {
-	panic(fmt.Errorf("not implemented: Args - args"))
+	if len(obj.Args) == 0 {
+		return nil, nil
+	}
+
+	args := make([]*models.EventArg, 0, len(obj.Args))
+	for key, value := range obj.Args {
+		args = append(args, &models.EventArg{
+			Name:  key,
+			Type:  fmt.Sprintf("%T", value),
+			Value: fmt.Sprintf("%v", value),
+		})
+	}
+	return args, nil
 }
 
 // RawLog is the resolver for the rawLog field.
 func (r *eventResolver) RawLog(ctx context.Context, obj *models.Event) (*string, error) {
-	panic(fmt.Errorf("not implemented: RawLog - rawLog"))
+	return nil, nil
 }
 
 // CreatedAt is the resolver for the createdAt field.
 func (r *eventResolver) CreatedAt(ctx context.Context, obj *models.Event) (*models.Timestamp, error) {
-	panic(fmt.Errorf("not implemented: CreatedAt - createdAt"))
+	return toTimestampPtr(obj.CreatedAt), nil
 }
 
 // Key is the resolver for the key field.
 func (r *eventArgResolver) Key(ctx context.Context, obj *models.EventArg) (string, error) {
-	panic(fmt.Errorf("not implemented: Key - key"))
+	return obj.Name, nil
 }
 
 // Value is the resolver for the value field.
 func (r *eventArgResolver) Value(ctx context.Context, obj *models.EventArg) (string, error) {
-	panic(fmt.Errorf("not implemented: Value - value"))
+	return fmt.Sprintf("%v", obj.Value), nil
 }
 
 // AddContract is the resolver for the addContract field.
 func (r *mutationResolver) AddContract(ctx context.Context, input models.AddContractInput) (*model.AddContractPayload, error) {
-	panic(fmt.Errorf("not implemented: AddContract - addContract"))
+	req := &protoapi.AddContractRequest{
+		Address:       string(input.Address),
+		Abi:           input.ABI,
+		Name:          input.Name,
+		StartBlock:    input.StartBlock,
+		ConfirmBlocks: int32(input.GetConfirmBlocks()),
+	}
+
+	resp, err := r.AdminClient.AddContract(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	payload := &model.AddContractPayload{
+		Success: resp.Success,
+		IsNew:   resp.IsNew,
+		Message: resp.Message,
+	}
+
+	if resp.Contract != nil {
+		id := fmt.Sprintf("%d", resp.Contract.Id)
+		payload.ContractID = &id
+	}
+
+	return payload, nil
 }
 
 // RemoveContract is the resolver for the removeContract field.
 func (r *mutationResolver) RemoveContract(ctx context.Context, address models.Address) (*model.RemoveContractPayload, error) {
-	panic(fmt.Errorf("not implemented: RemoveContract - removeContract"))
+	resp, err := r.AdminClient.RemoveContract(ctx, &protoapi.RemoveContractRequest{
+		Address: string(address),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &model.RemoveContractPayload{
+		Success: resp.Success,
+		Message: resp.Message,
+	}, nil
 }
 
 // TriggerBackfill is the resolver for the triggerBackfill field.
 func (r *mutationResolver) TriggerBackfill(ctx context.Context, input model.BackfillInput) (*model.BackfillPayload, error) {
-	panic(fmt.Errorf("not implemented: TriggerBackfill - triggerBackfill"))
+	from, err := strconv.ParseInt(input.FromBlock, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid fromBlock: %w", err)
+	}
+	to, err := strconv.ParseInt(input.ToBlock, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid toBlock: %w", err)
+	}
+
+	resp, err := r.AdminClient.TriggerBackfill(ctx, &protoapi.BackfillRequest{
+		ContractAddress: input.ContractAddress,
+		FromBlock:       from,
+		ToBlock:         to,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return backfillPayloadFromProto(resp), nil
 }
 
 // UpdateContract is the resolver for the updateContract field.
 func (r *mutationResolver) UpdateContract(ctx context.Context, address models.Address, confirmBlocks *int, isActive *bool) (*model.AddContractPayload, error) {
-	panic(fmt.Errorf("not implemented: UpdateContract - updateContract"))
+	return nil, errors.New("updateContract mutation not implemented yet")
 }
 
 // Events is the resolver for the events field.
 func (r *queryResolver) Events(ctx context.Context, filter *models.EventFilter, pagination *model.PaginationInput) (*models.EventConnection, error) {
-	panic(fmt.Errorf("not implemented: Events - events"))
+	req := &protoapi.EventQuery{}
+	applyEventFilter(req, filter)
+	applyPagination(req, pagination)
+
+	resp, err := r.QueryClient.GetEvents(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return eventConnectionFromProto(resp), nil
 }
 
 // EventsByTransaction is the resolver for the eventsByTransaction field.
 func (r *queryResolver) EventsByTransaction(ctx context.Context, txHash string) ([]*models.Event, error) {
-	panic(fmt.Errorf("not implemented: EventsByTransaction - eventsByTransaction"))
+	resp, err := r.QueryClient.GetEventsByTransaction(ctx, &protoapi.TransactionQuery{
+		TransactionHash: txHash,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return eventsFromProto(resp.Events), nil
 }
 
 // EventsByAddress is the resolver for the eventsByAddress field.
 func (r *queryResolver) EventsByAddress(ctx context.Context, address models.Address, pagination *model.PaginationInput) (*models.EventConnection, error) {
-	panic(fmt.Errorf("not implemented: EventsByAddress - eventsByAddress"))
+	req := &protoapi.AddressQuery{
+		Address: string(address),
+	}
+	if pagination != nil {
+		if pagination.First != nil {
+			req.First = int32(*pagination.First)
+		}
+		if pagination.After != nil {
+			req.After = *pagination.After
+		}
+		if pagination.Before != nil {
+			req.Before = *pagination.Before
+		}
+		if pagination.Last != nil {
+			req.Last = int32(*pagination.Last)
+		}
+	}
+
+	resp, err := r.QueryClient.GetEventsByAddress(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return eventConnectionFromProto(resp), nil
 }
 
 // Contract is the resolver for the contract field.
 func (r *queryResolver) Contract(ctx context.Context, address models.Address) (*models.Contract, error) {
-	panic(fmt.Errorf("not implemented: Contract - contract"))
+	resp, err := r.AdminClient.GetContract(ctx, &protoapi.GetContractRequest{
+		Address: string(address),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return contractFromProto(resp), nil
 }
 
 // Contracts is the resolver for the contracts field.
 func (r *queryResolver) Contracts(ctx context.Context, isActive *bool) ([]*models.Contract, error) {
-	panic(fmt.Errorf("not implemented: Contracts - contracts"))
+	resp, err := r.AdminClient.ListContracts(ctx, &protoapi.ListContractsRequest{
+		Limit:  50,
+		Offset: 0,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return contractsFromProto(resp.Contracts), nil
 }
 
 // ContractStats is the resolver for the contractStats field.
 func (r *queryResolver) ContractStats(ctx context.Context, address models.Address) (*models.ContractStats, error) {
-	panic(fmt.Errorf("not implemented: ContractStats - contractStats"))
+	resp, err := r.QueryClient.GetContractStats(ctx, &protoapi.StatsQuery{
+		ContractAddress: string(address),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return statsFromProto(resp), nil
 }
 
 // SystemStatus is the resolver for the systemStatus field.
 func (r *queryResolver) SystemStatus(ctx context.Context) (*model.SystemStatus, error) {
-	panic(fmt.Errorf("not implemented: SystemStatus - systemStatus"))
+	statusResp, err := r.AdminClient.GetSystemStatus(ctx, &protoapi.Empty{})
+	if err != nil {
+		return nil, err
+	}
+
+	var lastIndexed *string
+	if statusResp.LastIndexedBlock != 0 {
+		val := fmt.Sprintf("%d", statusResp.LastIndexedBlock)
+		lastIndexed = &val
+	}
+
+	return &model.SystemStatus{
+		IndexerLag:       int(statusResp.IndexerLag),
+		TotalContracts:   int(statusResp.TotalContracts),
+		TotalEvents:      int(statusResp.TotalEvents),
+		CacheHitRate:     statusResp.CacheHitRate,
+		LastIndexedBlock: lastIndexed,
+		IsHealthy:        statusResp.IsHealthy,
+		Uptime:           int(statusResp.Uptime),
+	}, nil
 }
 
 // StartBlock is the resolver for the startBlock field.
 func (r *addContractInputResolver) StartBlock(ctx context.Context, obj *models.AddContractInput, data models.BigInt) error {
-	panic(fmt.Errorf("not implemented: StartBlock - startBlock"))
+	value, err := strconv.ParseInt(string(data), 10, 64)
+	if err != nil {
+		return err
+	}
+	obj.StartBlock = value
+	return nil
 }
 
 // FromBlock is the resolver for the fromBlock field.
 func (r *eventFilterResolver) FromBlock(ctx context.Context, obj *models.EventFilter, data *models.BigInt) error {
-	panic(fmt.Errorf("not implemented: FromBlock - fromBlock"))
+	if data == nil {
+		obj.FromBlock = nil
+		return nil
+	}
+	value, err := strconv.ParseInt(string(*data), 10, 64)
+	if err != nil {
+		return err
+	}
+	obj.FromBlock = &value
+	return nil
 }
 
 // ToBlock is the resolver for the toBlock field.
 func (r *eventFilterResolver) ToBlock(ctx context.Context, obj *models.EventFilter, data *models.BigInt) error {
-	panic(fmt.Errorf("not implemented: ToBlock - toBlock"))
+	if data == nil {
+		obj.ToBlock = nil
+		return nil
+	}
+	value, err := strconv.ParseInt(string(*data), 10, 64)
+	if err != nil {
+		return err
+	}
+	obj.ToBlock = &value
+	return nil
 }
 
 // Addresses is the resolver for the addresses field.
 func (r *eventFilterResolver) Addresses(ctx context.Context, obj *models.EventFilter, data []models.Address) error {
-	panic(fmt.Errorf("not implemented: Addresses - addresses"))
+	obj.Addresses = data
+	return nil
 }
 
 // TransactionHash is the resolver for the transactionHash field.
 func (r *eventFilterResolver) TransactionHash(ctx context.Context, obj *models.EventFilter, data *string) error {
-	panic(fmt.Errorf("not implemented: TransactionHash - transactionHash"))
+	if data == nil {
+		obj.TransactionHash = nil
+		return nil
+	}
+	hash := models.Hash(*data)
+	obj.TransactionHash = &hash
+	return nil
 }
 
 // Contract returns generated.ContractResolver implementation.
@@ -217,3 +390,58 @@ type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
 type addContractInputResolver struct{ *Resolver }
 type eventFilterResolver struct{ *Resolver }
+
+func applyEventFilter(req *protoapi.EventQuery, filter *models.EventFilter) {
+	if filter == nil {
+		return
+	}
+	if filter.ContractAddress != nil {
+		req.ContractAddress = string(*filter.ContractAddress)
+	}
+	if filter.EventName != nil {
+		req.EventName = *filter.EventName
+	}
+	if filter.FromBlock != nil {
+		req.FromBlock = *filter.FromBlock
+	}
+	if filter.ToBlock != nil {
+		req.ToBlock = *filter.ToBlock
+	}
+	if filter.TransactionHash != nil {
+		req.TransactionHash = string(*filter.TransactionHash)
+	}
+	if len(filter.Addresses) > 0 {
+		req.Addresses = make([]string, len(filter.Addresses))
+		for i, addr := range filter.Addresses {
+			req.Addresses[i] = string(addr)
+		}
+	} else if filter.Address != nil {
+		req.Addresses = []string{string(*filter.Address)}
+	}
+}
+
+func applyPagination(req *protoapi.EventQuery, pagination *model.PaginationInput) {
+	if pagination == nil {
+		return
+	}
+	if pagination.First != nil {
+		req.First = int32(*pagination.First)
+	}
+	if pagination.After != nil {
+		req.After = *pagination.After
+	}
+	if pagination.Before != nil {
+		req.Before = *pagination.Before
+	}
+	if pagination.Last != nil {
+		req.Last = int32(*pagination.Last)
+	}
+}
+
+func toTimestampPtr(t time.Time) *models.Timestamp {
+	if t.IsZero() {
+		return nil
+	}
+	ts := models.NewTimestamp(t)
+	return &ts
+}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -73,22 +74,22 @@ type BackfillRequest struct {
 
 // BackfillResponse represents the response for backfill
 type BackfillResponse struct {
-	Success     bool   `json:"success"`
-	JobID       string `json:"job_id"`
-	Message     string `json:"message"`
-	EstimatedTime string `json:"estimated_time"`
+	Success          bool   `json:"success"`
+	JobID            string `json:"job_id"`
+	Message          string `json:"message"`
+	EstimatedMinutes int64  `json:"estimated_minutes"`
 }
 
 // SystemStatusResponse represents system status
 type SystemStatusResponse struct {
-	IndexerLag      int64                    `json:"indexer_lag"`
-	TotalContracts  int32                    `json:"total_contracts"`
-	TotalEvents     int64                    `json:"total_events"`
-	CacheHitRate    float64                  `json:"cache_hit_rate"`
-	LastIndexedBlock int64                   `json:"last_indexed_block"`
-	IsHealthy       bool                     `json:"is_healthy"`
-	Uptime          int64                    `json:"uptime"`
-	Services        map[string]ServiceStatus `json:"services"`
+	IndexerLag       int64                    `json:"indexer_lag"`
+	TotalContracts   int32                    `json:"total_contracts"`
+	TotalEvents      int64                    `json:"total_events"`
+	CacheHitRate     float64                  `json:"cache_hit_rate"`
+	LastIndexedBlock int64                    `json:"last_indexed_block"`
+	IsHealthy        bool                     `json:"is_healthy"`
+	Uptime           int64                    `json:"uptime"`
+	Services         map[string]ServiceStatus `json:"services"`
 }
 
 // ServiceStatus represents the status of a service
@@ -96,6 +97,21 @@ type ServiceStatus struct {
 	Status  string `json:"status"`
 	Latency int64  `json:"latency_ms"`
 	Error   string `json:"error,omitempty"`
+}
+
+// BackfillJob represents job metadata stored in Redis.
+type BackfillJob struct {
+	ID              string
+	ContractAddress string
+	FromBlock       int64
+	ToBlock         int64
+	CurrentBlock    int64
+	Status          string
+	ErrorMessage    string
+	Progress        float64
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	CompletedAt     *time.Time
 }
 
 // AddContract adds a new contract for monitoring
@@ -118,7 +134,7 @@ func (s *AdminService) AddContract(ctx context.Context, req *AddContractRequest)
 	var existingID int32
 	checkQuery := "SELECT id FROM contracts WHERE address = $1"
 	err := s.db.QueryRowContext(ctx, checkQuery, req.Address).Scan(&existingID)
-	
+
 	if err == nil {
 		// Contract exists, return existing contract info
 		return &AddContractResponse{
@@ -276,11 +292,141 @@ func (s *AdminService) TriggerBackfill(ctx context.Context, req *BackfillRequest
 	s.logger.Info("Backfill job created", "job_id", jobID, "address", req.Address, "from_block", req.FromBlock, "to_block", req.ToBlock)
 
 	return &BackfillResponse{
-		Success:       true,
-		JobID:         jobID,
-		Message:       "Backfill job created successfully",
-		EstimatedTime: fmt.Sprintf("%d minutes", estimatedMinutes),
+		Success:          true,
+		JobID:            jobID,
+		Message:          "Backfill job created successfully",
+		EstimatedMinutes: estimatedMinutes,
 	}, nil
+}
+
+// GetContract fetches a contract by address.
+func (s *AdminService) GetContract(ctx context.Context, address string) (*models.Contract, error) {
+	query := `
+		SELECT id, address, abi, name, start_block, current_block, confirm_blocks, created_at, updated_at
+		FROM contracts
+		WHERE address = $1
+	`
+	row := s.db.QueryRowContext(ctx, query, address)
+	var contract models.Contract
+	if err := row.Scan(
+		&contract.ID,
+		&contract.Address,
+		&contract.ABI,
+		&contract.Name,
+		&contract.StartBlock,
+		&contract.CurrentBlock,
+		&contract.ConfirmBlocks,
+		&contract.CreatedAt,
+		&contract.UpdatedAt,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &contract, nil
+}
+
+// ListContracts returns paginated contracts.
+func (s *AdminService) ListContracts(ctx context.Context, limit, offset int32) ([]*models.Contract, int32, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := `
+		SELECT id, address, abi, name, start_block, current_block, confirm_blocks, created_at, updated_at
+		FROM contracts
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`
+	rows, err := s.db.QueryContext(ctx, query, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var contracts []*models.Contract
+	for rows.Next() {
+		var contract models.Contract
+		if err := rows.Scan(
+			&contract.ID,
+			&contract.Address,
+			&contract.ABI,
+			&contract.Name,
+			&contract.StartBlock,
+			&contract.CurrentBlock,
+			&contract.ConfirmBlocks,
+			&contract.CreatedAt,
+			&contract.UpdatedAt,
+		); err != nil {
+			return nil, 0, err
+		}
+		contracts = append(contracts, &contract)
+	}
+
+	var total int32
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM contracts").Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	return contracts, total, nil
+}
+
+// GetBackfillJob retrieves job info stored in Redis.
+func (s *AdminService) GetBackfillJob(ctx context.Context, jobID string) (*BackfillJob, error) {
+	jobKey := fmt.Sprintf("backfill_job:%s", jobID)
+	data, err := s.redisClient.HGetAll(ctx, jobKey).Result()
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	parseInt := func(key string) int64 {
+		str := data[key]
+		if str == "" {
+			return 0
+		}
+		val, _ := strconv.ParseInt(str, 10, 64)
+		return val
+	}
+
+	parseFloat := func(key string) float64 {
+		str := data[key]
+		if str == "" {
+			return 0
+		}
+		val, _ := strconv.ParseFloat(str, 64)
+		return val
+	}
+
+	job := &BackfillJob{
+		ID:              jobID,
+		ContractAddress: data["address"],
+		FromBlock:       parseInt("from_block"),
+		ToBlock:         parseInt("to_block"),
+		CurrentBlock:    parseInt("current_block"),
+		Status:          data["status"],
+		ErrorMessage:    data["error_message"],
+		Progress:        parseFloat("progress"),
+	}
+
+	if created := parseInt("created_at"); created > 0 {
+		job.CreatedAt = time.Unix(created, 0)
+	}
+	if updated := parseInt("updated_at"); updated > 0 {
+		job.UpdatedAt = time.Unix(updated, 0)
+	}
+	if completed := parseInt("completed_at"); completed > 0 {
+		t := time.Unix(completed, 0)
+		job.CompletedAt = &t
+	}
+
+	return job, nil
 }
 
 // GetSystemStatus returns the current system status
@@ -308,7 +454,7 @@ func (s *AdminService) GetSystemStatus(ctx context.Context) (*SystemStatusRespon
 
 	// Check service health
 	services := make(map[string]ServiceStatus)
-	
+
 	// Database health
 	dbStart := time.Now()
 	if err := s.db.PingContext(ctx); err != nil {
@@ -347,13 +493,13 @@ func (s *AdminService) GetSystemStatus(ctx context.Context) (*SystemStatusRespon
 	}
 
 	return &SystemStatusResponse{
-		IndexerLag:      0, // Would be calculated based on current time vs block timestamp
-		TotalContracts:  totalContracts,
-		TotalEvents:     totalEvents,
-		CacheHitRate:    0.0, // Would be calculated from Redis metrics
+		IndexerLag:       0, // Would be calculated based on current time vs block timestamp
+		TotalContracts:   totalContracts,
+		TotalEvents:      totalEvents,
+		CacheHitRate:     0.0, // Would be calculated from Redis metrics
 		LastIndexedBlock: lastIndexedBlock,
-		IsHealthy:       isHealthy,
-		Uptime:          time.Now().Unix(), // Simplified
-		Services:        services,
+		IsHealthy:        isHealthy,
+		Uptime:           time.Now().Unix(), // Simplified
+		Services:         services,
 	}, nil
 }
