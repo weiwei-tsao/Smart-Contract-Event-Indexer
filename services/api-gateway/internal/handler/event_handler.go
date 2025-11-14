@@ -2,6 +2,7 @@ package handler
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -172,6 +173,7 @@ func restEventsFromProto(evts []*protoapi.Event) []models.Event {
 		if evt.CreatedAt != nil {
 			event.CreatedAt = evt.CreatedAt.AsTime()
 		}
+		event.RawLog = rawLogFromArgs(event.Args)
 		results = append(results, event)
 	}
 	return results
@@ -189,4 +191,16 @@ func argsMapFromProto(args []*protoapi.EventArg) models.JSONB {
 		result[arg.Key] = arg.Value
 	}
 	return result
+}
+
+func rawLogFromArgs(args models.JSONB) *string {
+	if len(args) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(args)
+	if err != nil {
+		return nil
+	}
+	raw := string(data)
+	return &raw
 }

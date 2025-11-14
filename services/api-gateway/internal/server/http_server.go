@@ -48,14 +48,15 @@ func NewHTTPServer(
 	router.Use(middleware.Logger(logger))
 	router.Use(middleware.Recovery(logger))
 	router.Use(middleware.CORS(cfg.CORSOrigins))
-	router.Use(middleware.RateLimiter(redisClient, cfg.RateLimitFreeTier, time.Minute))
+	router.Use(middleware.APIKeyAuth(cfg, logger))
+	router.Use(middleware.RateLimiter(redisClient, cfg.RateLimitFreeTier, cfg.RateLimitProTier, time.Minute))
 
 	// Create handlers
 	eventHandler := handler.NewEventHandler(db, redisClient, queryClient, logger, cfg)
 	contractHandler := handler.NewContractHandler(db, redisClient, adminClient, queryClient, logger, cfg)
 	healthHandler := handler.NewHealthHandler(db, redisClient, logger)
 
-	// GraphQL resolver
+	// GraphQL resolver + dataloaders
 	resolver := &graph.Resolver{
 		DB:          db,
 		Redis:       redisClient,
@@ -64,6 +65,7 @@ func NewHTTPServer(
 		Logger:      logger,
 		Config:      cfg,
 	}
+	loaderFactory := graph.NewLoaderFactory(db, logger)
 	gqlServer := gqlhandler.NewDefaultServer(
 		generated.NewExecutableSchema(generated.Config{Resolvers: resolver}),
 	)
@@ -95,10 +97,12 @@ func NewHTTPServer(
 
 	// GraphQL endpoints
 	router.POST("/graphql", func(c *gin.Context) {
-		gqlServer.ServeHTTP(c.Writer, c.Request)
+		ctx := graph.WithLoaders(c.Request.Context(), loaderFactory.New())
+		gqlServer.ServeHTTP(c.Writer, c.Request.WithContext(ctx))
 	})
 	router.GET("/graphql", func(c *gin.Context) {
-		gqlServer.ServeHTTP(c.Writer, c.Request)
+		ctx := graph.WithLoaders(c.Request.Context(), loaderFactory.New())
+		gqlServer.ServeHTTP(c.Writer, c.Request.WithContext(ctx))
 	})
 	router.GET("/playground", func(c *gin.Context) {
 		playground.Handler("GraphQL Playground", "/graphql").ServeHTTP(c.Writer, c.Request)

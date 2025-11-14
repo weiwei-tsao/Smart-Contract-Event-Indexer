@@ -64,7 +64,7 @@ func eventFromProto(evt *protoapi.Event) *models.Event {
 		createdAt = evt.CreatedAt.AsTime()
 	}
 
-	return &models.Event{
+	event := &models.Event{
 		ID:               evt.Id,
 		ContractAddress:  models.Address(evt.ContractAddress),
 		EventName:        evt.EventName,
@@ -77,6 +77,8 @@ func eventFromProto(evt *protoapi.Event) *models.Event {
 		Timestamp:        timestamp,
 		CreatedAt:        createdAt,
 	}
+	event.RawLog = encodeRawLog(args)
+	return event
 }
 
 func pageInfoFromProto(pi *protoapi.PageInfo) models.PageInfo {

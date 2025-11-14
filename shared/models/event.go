@@ -15,6 +15,7 @@ type Event struct {
 	TransactionIndex int       `db:"transaction_index" json:"transactionIndex"`
 	LogIndex         int       `db:"log_index" json:"logIndex"`
 	Args             JSONB     `db:"args" json:"args"`
+	RawLog           *string   `db:"raw_log" json:"rawLog,omitempty"`
 	Timestamp        time.Time `db:"timestamp" json:"timestamp"`
 	CreatedAt        time.Time `db:"created_at" json:"createdAt"`
 }

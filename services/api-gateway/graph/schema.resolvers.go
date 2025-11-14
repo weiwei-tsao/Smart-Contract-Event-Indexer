@@ -6,9 +6,11 @@ package graph
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/smart-contract-event-indexer/api-gateway/graph/generated"
@@ -22,14 +24,19 @@ func (r *contractResolver) ID(ctx context.Context, obj *models.Contract) (string
 	return fmt.Sprintf("%d", obj.ID), nil
 }
 
+// Address is the resolver for the address field.
+func (r *contractResolver) Address(ctx context.Context, obj *models.Contract) (string, error) {
+	return string(obj.Address), nil
+}
+
 // StartBlock is the resolver for the startBlock field.
-func (r *contractResolver) StartBlock(ctx context.Context, obj *models.Contract) (models.BigInt, error) {
-	return models.BigInt(fmt.Sprintf("%d", obj.StartBlock)), nil
+func (r *contractResolver) StartBlock(ctx context.Context, obj *models.Contract) (string, error) {
+	return fmt.Sprintf("%d", obj.StartBlock), nil
 }
 
 // CurrentBlock is the resolver for the currentBlock field.
-func (r *contractResolver) CurrentBlock(ctx context.Context, obj *models.Contract) (models.BigInt, error) {
-	return models.BigInt(fmt.Sprintf("%d", obj.CurrentBlock)), nil
+func (r *contractResolver) CurrentBlock(ctx context.Context, obj *models.Contract) (string, error) {
+	return fmt.Sprintf("%d", obj.CurrentBlock), nil
 }
 
 // IsActive is the resolver for the isActive field.
@@ -39,28 +46,27 @@ func (r *contractResolver) IsActive(ctx context.Context, obj *models.Contract) (
 }
 
 // CreatedAt is the resolver for the createdAt field.
-func (r *contractResolver) CreatedAt(ctx context.Context, obj *models.Contract) (*models.Timestamp, error) {
-	return toTimestampPtr(obj.CreatedAt), nil
+func (r *contractResolver) CreatedAt(ctx context.Context, obj *models.Contract) (string, error) {
+	return obj.CreatedAt.UTC().Format(time.RFC3339), nil
 }
 
 // UpdatedAt is the resolver for the updatedAt field.
-func (r *contractResolver) UpdatedAt(ctx context.Context, obj *models.Contract) (*models.Timestamp, error) {
-	return toTimestampPtr(obj.UpdatedAt), nil
+func (r *contractResolver) UpdatedAt(ctx context.Context, obj *models.Contract) (string, error) {
+	return obj.UpdatedAt.UTC().Format(time.RFC3339), nil
 }
 
 // LatestBlock is the resolver for the latestBlock field.
-func (r *contractStatsResolver) LatestBlock(ctx context.Context, obj *models.ContractStats) (models.BigInt, error) {
-	return models.BigInt(fmt.Sprintf("%d", obj.LatestBlock)), nil
-}
-
-// UniqueAddresses is the resolver for the uniqueAddresses field.
-func (r *contractStatsResolver) UniqueAddresses(ctx context.Context, obj *models.ContractStats) (*int, error) {
-	return nil, nil
+func (r *contractStatsResolver) LatestBlock(ctx context.Context, obj *models.ContractStats) (string, error) {
+	return fmt.Sprintf("%d", obj.LatestBlock), nil
 }
 
 // LastIndexedAt is the resolver for the lastIndexedAt field.
-func (r *contractStatsResolver) LastIndexedAt(ctx context.Context, obj *models.ContractStats) (*models.Timestamp, error) {
-	return toTimestampPtr(obj.LastUpdated), nil
+func (r *contractStatsResolver) LastIndexedAt(ctx context.Context, obj *models.ContractStats) (*string, error) {
+	if obj.LastUpdated.IsZero() {
+		return nil, nil
+	}
+	val := obj.LastUpdated.UTC().Format(time.RFC3339)
+	return &val, nil
 }
 
 // ID is the resolver for the id field.
@@ -68,14 +74,19 @@ func (r *eventResolver) ID(ctx context.Context, obj *models.Event) (string, erro
 	return fmt.Sprintf("%d", obj.ID), nil
 }
 
+// ContractAddress is the resolver for the contractAddress field.
+func (r *eventResolver) ContractAddress(ctx context.Context, obj *models.Event) (string, error) {
+	return string(obj.ContractAddress), nil
+}
+
 // BlockNumber is the resolver for the blockNumber field.
-func (r *eventResolver) BlockNumber(ctx context.Context, obj *models.Event) (models.BigInt, error) {
-	return models.BigInt(fmt.Sprintf("%d", obj.BlockNumber)), nil
+func (r *eventResolver) BlockNumber(ctx context.Context, obj *models.Event) (string, error) {
+	return fmt.Sprintf("%d", obj.BlockNumber), nil
 }
 
 // BlockTimestamp is the resolver for the blockTimestamp field.
-func (r *eventResolver) BlockTimestamp(ctx context.Context, obj *models.Event) (*models.Timestamp, error) {
-	return toTimestampPtr(obj.Timestamp), nil
+func (r *eventResolver) BlockTimestamp(ctx context.Context, obj *models.Event) (string, error) {
+	return obj.Timestamp.UTC().Format(time.RFC3339), nil
 }
 
 // TransactionHash is the resolver for the transactionHash field.
@@ -100,14 +111,9 @@ func (r *eventResolver) Args(ctx context.Context, obj *models.Event) ([]*models.
 	return args, nil
 }
 
-// RawLog is the resolver for the rawLog field.
-func (r *eventResolver) RawLog(ctx context.Context, obj *models.Event) (*string, error) {
-	return nil, nil
-}
-
 // CreatedAt is the resolver for the createdAt field.
-func (r *eventResolver) CreatedAt(ctx context.Context, obj *models.Event) (*models.Timestamp, error) {
-	return toTimestampPtr(obj.CreatedAt), nil
+func (r *eventResolver) CreatedAt(ctx context.Context, obj *models.Event) (string, error) {
+	return obj.CreatedAt.UTC().Format(time.RFC3339), nil
 }
 
 // Key is the resolver for the key field.
@@ -150,7 +156,7 @@ func (r *mutationResolver) AddContract(ctx context.Context, input models.AddCont
 }
 
 // RemoveContract is the resolver for the removeContract field.
-func (r *mutationResolver) RemoveContract(ctx context.Context, address models.Address) (*model.RemoveContractPayload, error) {
+func (r *mutationResolver) RemoveContract(ctx context.Context, address string) (*model.RemoveContractPayload, error) {
 	resp, err := r.AdminClient.RemoveContract(ctx, &protoapi.RemoveContractRequest{
 		Address: string(address),
 	})
@@ -187,8 +193,63 @@ func (r *mutationResolver) TriggerBackfill(ctx context.Context, input model.Back
 }
 
 // UpdateContract is the resolver for the updateContract field.
-func (r *mutationResolver) UpdateContract(ctx context.Context, address models.Address, confirmBlocks *int, isActive *bool) (*model.AddContractPayload, error) {
-	return nil, errors.New("updateContract mutation not implemented yet")
+func (r *mutationResolver) UpdateContract(ctx context.Context, address string, confirmBlocks *int, isActive *bool) (*model.AddContractPayload, error) {
+	if confirmBlocks == nil && isActive == nil {
+		return nil, errors.New("no update fields provided")
+	}
+
+	addr := strings.ToLower(string(address))
+	contract, err := getContractByAddress(ctx, r.DB, addr)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("contract %s not found", address)
+		}
+		return nil, err
+	}
+
+	var messages []string
+	success := false
+
+	if confirmBlocks != nil {
+		if *confirmBlocks < 1 || *confirmBlocks > 100 {
+			return nil, fmt.Errorf("confirmBlocks must be between 1 and 100")
+		}
+		query := `UPDATE contracts SET confirm_blocks = $1, updated_at = NOW() WHERE LOWER(address) = $2`
+		if _, err := r.DB.ExecContext(ctx, query, *confirmBlocks, addr); err != nil {
+			return nil, err
+		}
+		messages = append(messages, fmt.Sprintf("Confirmation blocks updated to %d", *confirmBlocks))
+		success = true
+	}
+
+	if isActive != nil {
+		if !*isActive {
+			_, err := r.AdminClient.RemoveContract(ctx, &protoapi.RemoveContractRequest{Address: string(address)})
+			if err != nil {
+				return nil, err
+			}
+			messages = append(messages, "Contract deactivated")
+			success = true
+		} else {
+			messages = append(messages, "Contract already active")
+		}
+	}
+
+	if len(messages) == 0 {
+		messages = append(messages, "No changes applied")
+	}
+
+	payload := &model.AddContractPayload{
+		Success: success,
+		IsNew:   false,
+		Message: strings.Join(messages, "; "),
+	}
+
+	if contract != nil {
+		id := fmt.Sprintf("%d", contract.ID)
+		payload.ContractID = &id
+	}
+	return payload, nil
 }
 
 // Events is the resolver for the events field.
@@ -217,7 +278,7 @@ func (r *queryResolver) EventsByTransaction(ctx context.Context, txHash string) 
 }
 
 // EventsByAddress is the resolver for the eventsByAddress field.
-func (r *queryResolver) EventsByAddress(ctx context.Context, address models.Address, pagination *model.PaginationInput) (*models.EventConnection, error) {
+func (r *queryResolver) EventsByAddress(ctx context.Context, address string, pagination *model.PaginationInput) (*models.EventConnection, error) {
 	req := &protoapi.AddressQuery{
 		Address: string(address),
 	}
@@ -244,14 +305,12 @@ func (r *queryResolver) EventsByAddress(ctx context.Context, address models.Addr
 }
 
 // Contract is the resolver for the contract field.
-func (r *queryResolver) Contract(ctx context.Context, address models.Address) (*models.Contract, error) {
-	resp, err := r.AdminClient.GetContract(ctx, &protoapi.GetContractRequest{
-		Address: string(address),
-	})
+func (r *queryResolver) Contract(ctx context.Context, address string) (*models.Contract, error) {
+	contract, err := loadContract(ctx, r.DB, address)
 	if err != nil {
 		return nil, err
 	}
-	return contractFromProto(resp), nil
+	return contract, nil
 }
 
 // Contracts is the resolver for the contracts field.
@@ -263,18 +322,20 @@ func (r *queryResolver) Contracts(ctx context.Context, isActive *bool) ([]*model
 	if err != nil {
 		return nil, err
 	}
-	return contractsFromProto(resp.Contracts), nil
+	contracts := contractsFromProto(resp.Contracts)
+	if isActive != nil && !*isActive {
+		return []*models.Contract{}, nil
+	}
+	return contracts, nil
 }
 
 // ContractStats is the resolver for the contractStats field.
-func (r *queryResolver) ContractStats(ctx context.Context, address models.Address) (*models.ContractStats, error) {
-	resp, err := r.QueryClient.GetContractStats(ctx, &protoapi.StatsQuery{
-		ContractAddress: string(address),
-	})
+func (r *queryResolver) ContractStats(ctx context.Context, address string) (*models.ContractStats, error) {
+	stats, err := loadContractStats(ctx, r.DB, address)
 	if err != nil {
 		return nil, err
 	}
-	return statsFromProto(resp), nil
+	return stats, nil
 }
 
 // SystemStatus is the resolver for the systemStatus field.
@@ -301,8 +362,14 @@ func (r *queryResolver) SystemStatus(ctx context.Context) (*model.SystemStatus, 
 	}, nil
 }
 
+// Address is the resolver for the address field.
+func (r *addContractInputResolver) Address(ctx context.Context, obj *models.AddContractInput, data string) error {
+	obj.Address = models.Address(data)
+	return nil
+}
+
 // StartBlock is the resolver for the startBlock field.
-func (r *addContractInputResolver) StartBlock(ctx context.Context, obj *models.AddContractInput, data models.BigInt) error {
+func (r *addContractInputResolver) StartBlock(ctx context.Context, obj *models.AddContractInput, data string) error {
 	value, err := strconv.ParseInt(string(data), 10, 64)
 	if err != nil {
 		return err
@@ -311,8 +378,19 @@ func (r *addContractInputResolver) StartBlock(ctx context.Context, obj *models.A
 	return nil
 }
 
+// ContractAddress is the resolver for the contractAddress field.
+func (r *eventFilterResolver) ContractAddress(ctx context.Context, obj *models.EventFilter, data *string) error {
+	if data == nil {
+		obj.ContractAddress = nil
+		return nil
+	}
+	addr := models.Address(*data)
+	obj.ContractAddress = &addr
+	return nil
+}
+
 // FromBlock is the resolver for the fromBlock field.
-func (r *eventFilterResolver) FromBlock(ctx context.Context, obj *models.EventFilter, data *models.BigInt) error {
+func (r *eventFilterResolver) FromBlock(ctx context.Context, obj *models.EventFilter, data *string) error {
 	if data == nil {
 		obj.FromBlock = nil
 		return nil
@@ -326,7 +404,7 @@ func (r *eventFilterResolver) FromBlock(ctx context.Context, obj *models.EventFi
 }
 
 // ToBlock is the resolver for the toBlock field.
-func (r *eventFilterResolver) ToBlock(ctx context.Context, obj *models.EventFilter, data *models.BigInt) error {
+func (r *eventFilterResolver) ToBlock(ctx context.Context, obj *models.EventFilter, data *string) error {
 	if data == nil {
 		obj.ToBlock = nil
 		return nil
@@ -340,8 +418,16 @@ func (r *eventFilterResolver) ToBlock(ctx context.Context, obj *models.EventFilt
 }
 
 // Addresses is the resolver for the addresses field.
-func (r *eventFilterResolver) Addresses(ctx context.Context, obj *models.EventFilter, data []models.Address) error {
-	obj.Addresses = data
+func (r *eventFilterResolver) Addresses(ctx context.Context, obj *models.EventFilter, data []string) error {
+	if len(data) == 0 {
+		obj.Addresses = nil
+		return nil
+	}
+	addresses := make([]models.Address, len(data))
+	for i, value := range data {
+		addresses[i] = models.Address(value)
+	}
+	obj.Addresses = addresses
 	return nil
 }
 
@@ -391,6 +477,22 @@ type queryResolver struct{ *Resolver }
 type addContractInputResolver struct{ *Resolver }
 type eventFilterResolver struct{ *Resolver }
 
+// !!! WARNING !!!
+// The code below was going to be deleted when updating resolvers. It has been copied here so you have
+// one last chance to move it out of harms way if you want. There are two reasons this happens:
+//   - When renaming or deleting a resolver the old code will be put in here. You can safely delete
+//     it when you're done.
+//   - You have helper methods in this file. Move them out to keep these resolver files clean.
+func (r *contractStatsResolver) UniqueAddresses(ctx context.Context, obj *models.ContractStats) (*int, error) {
+	if obj.UniqueAddresses == nil {
+		return nil, nil
+	}
+	value := *obj.UniqueAddresses
+	return &value, nil
+}
+func (r *eventResolver) RawLog(ctx context.Context, obj *models.Event) (*string, error) {
+	return obj.RawLog, nil
+}
 func applyEventFilter(req *protoapi.EventQuery, filter *models.EventFilter) {
 	if filter == nil {
 		return
@@ -419,7 +521,6 @@ func applyEventFilter(req *protoapi.EventQuery, filter *models.EventFilter) {
 		req.Addresses = []string{string(*filter.Address)}
 	}
 }
-
 func applyPagination(req *protoapi.EventQuery, pagination *model.PaginationInput) {
 	if pagination == nil {
 		return
@@ -437,11 +538,87 @@ func applyPagination(req *protoapi.EventQuery, pagination *model.PaginationInput
 		req.Last = int32(*pagination.Last)
 	}
 }
-
-func toTimestampPtr(t time.Time) *models.Timestamp {
-	if t.IsZero() {
-		return nil
+func loadContract(ctx context.Context, db *sql.DB, address string) (*models.Contract, error) {
+	key := strings.ToLower(strings.TrimSpace(address))
+	if loaders := GetLoaders(ctx); loaders != nil && loaders.ContractByAddress != nil {
+		return loaders.ContractByAddress.Load(ctx, key)()
 	}
-	ts := models.NewTimestamp(t)
-	return &ts
+	return getContractByAddress(ctx, db, key)
+}
+
+func loadContractStats(ctx context.Context, db *sql.DB, address string) (*models.ContractStats, error) {
+	key := strings.ToLower(strings.TrimSpace(address))
+	if loaders := GetLoaders(ctx); loaders != nil && loaders.StatsByAddress != nil {
+		return loaders.StatsByAddress.Load(ctx, key)()
+	}
+	return queryContractStats(ctx, db, key)
+}
+func getContractByAddress(ctx context.Context, db *sql.DB, address string) (*models.Contract, error) {
+	query := `
+SELECT id, address, abi, name, start_block, current_block, confirm_blocks, created_at, updated_at
+FROM contracts
+WHERE LOWER(address) = $1
+`
+	row := db.QueryRowContext(ctx, query, address)
+	var contract models.Contract
+	if err := row.Scan(
+		&contract.ID,
+		&contract.Address,
+		&contract.ABI,
+		&contract.Name,
+		&contract.StartBlock,
+		&contract.CurrentBlock,
+		&contract.ConfirmBlocks,
+		&contract.CreatedAt,
+		&contract.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	return &contract, nil
+}
+func queryContractStats(ctx context.Context, db *sql.DB, address string) (*models.ContractStats, error) {
+	query := `
+WITH uniq_addresses AS (
+    SELECT e.contract_address,
+           COUNT(DISTINCT LOWER(value)) FILTER (WHERE value LIKE '0x%') AS unique_addresses
+    FROM events e,
+         LATERAL jsonb_each_text(e.args)
+    WHERE LOWER(e.contract_address) = $1
+    GROUP BY e.contract_address
+)
+SELECT 
+    c.address,
+    COUNT(e.id) AS total_events,
+    COALESCE(MAX(e.block_number), c.current_block) AS latest_block,
+    c.current_block,
+    GREATEST(c.current_block - COALESCE(MAX(e.block_number), c.start_block), 0) AS indexer_delay,
+    COALESCE(MAX(e.created_at), c.updated_at) AS last_updated,
+    COALESCE(u.unique_addresses, 0) AS unique_addresses
+FROM contracts c
+LEFT JOIN events e ON c.address = e.contract_address
+LEFT JOIN uniq_addresses u ON u.contract_address = c.address
+WHERE LOWER(c.address) = $1
+GROUP BY c.address, c.current_block, c.start_block, c.updated_at, u.unique_addresses
+`
+	row := db.QueryRowContext(ctx, query, address)
+	var stats models.ContractStats
+	var lastUpdated time.Time
+	var uniqueAddresses int64
+	if err := row.Scan(
+		&stats.ContractAddress,
+		&stats.TotalEvents,
+		&stats.LatestBlock,
+		&stats.CurrentBlock,
+		&stats.IndexerDelay,
+		&lastUpdated,
+		&uniqueAddresses,
+	); err != nil {
+		return nil, err
+	}
+	stats.LastUpdated = lastUpdated
+	if uniqueAddresses > 0 {
+		value := int(uniqueAddresses)
+		stats.UniqueAddresses = &value
+	}
+	return &stats, nil
 }

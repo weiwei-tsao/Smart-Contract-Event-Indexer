@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Phase 3 closure TODO checklist and instructions for finalizing the API layer
+- GraphQL dataloaders + resolver enhancements for contract lookups, raw logs, unique address counts, and contract updates
+- API Gateway API-key authentication with tier-aware Redis rate limiting
+- Resilient gRPC connection pooling with retry/backoff for Query/Admin service calls
 - GraphQL/API Gateway now proxies through gRPC Query/Admin services with gqlgen resolvers
 - Integration test helper utilities for service-level testing
 - Complete Phase 2 Indexer Service implementation

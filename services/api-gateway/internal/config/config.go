@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -18,16 +19,21 @@ type Config struct {
 	RedisURL string `json:"redis_url"`
 
 	// gRPC configuration
-	QueryServiceAddr string `json:"query_service_addr"`
-	AdminServiceAddr string `json:"admin_service_addr"`
+	QueryServiceAddr string        `json:"query_service_addr"`
+	AdminServiceAddr string        `json:"admin_service_addr"`
 	GRPCTimeout      time.Duration `json:"grpc_timeout"`
+	GRPCPoolSize     int           `json:"grpc_pool_size"`
+	GRPCRetries      int           `json:"grpc_retries"`
+	GRPCRetryBackoff time.Duration `json:"grpc_retry_backoff"`
 
 	// CORS configuration
 	CORSOrigins []string `json:"cors_origins"`
 
 	// Rate limiting configuration
-	RateLimitFreeTier int `json:"rate_limit_free_tier"`
-	RateLimitProTier  int `json:"rate_limit_pro_tier"`
+	RateLimitFreeTier int      `json:"rate_limit_free_tier"`
+	RateLimitProTier  int      `json:"rate_limit_pro_tier"`
+	APIKeysFree       []string `json:"api_keys_free"`
+	APIKeysPro        []string `json:"api_keys_pro"`
 
 	// Logging configuration
 	LogLevel  string `json:"log_level"`
@@ -47,9 +53,14 @@ func Load(configPath string) (*Config, error) {
 		QueryServiceAddr:  getEnvString("QUERY_SERVICE_ADDR", "localhost:8081"),
 		AdminServiceAddr:  getEnvString("ADMIN_SERVICE_ADDR", "localhost:8082"),
 		GRPCTimeout:       getEnvDuration("GRPC_TIMEOUT", 10*time.Second),
+		GRPCPoolSize:      getEnvInt("GRPC_POOL_SIZE", 2),
+		GRPCRetries:       getEnvInt("GRPC_RETRIES", 3),
+		GRPCRetryBackoff:  getEnvDuration("GRPC_RETRY_BACKOFF", 200*time.Millisecond),
 		CORSOrigins:       getEnvStringSlice("CORS_ORIGINS", []string{"http://localhost:3000"}),
 		RateLimitFreeTier: getEnvInt("RATE_LIMIT_FREE_TIER", 100),
 		RateLimitProTier:  getEnvInt("RATE_LIMIT_PRO_TIER", 1000),
+		APIKeysFree:       getEnvCSV("API_KEYS_FREE"),
+		APIKeysPro:        getEnvCSV("API_KEYS_PRO"),
 		LogLevel:          getEnvString("LOG_LEVEL", "info"),
 		LogFormat:         getEnvString("LOG_FORMAT", "json"),
 		MaxQueryLimit:     getEnvInt("MAX_QUERY_LIMIT", 1000),
@@ -90,16 +101,24 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 // getEnvStringSlice gets an environment variable as a string slice with a default value
 func getEnvStringSlice(key string, defaultValue []string) []string {
 	if value := os.Getenv(key); value != "" {
-		// Simple comma-separated parsing
-		parts := []string{}
-		for _, part := range []string{value} {
-			if part != "" {
-				parts = append(parts, part)
+		parts := strings.Split(value, ",")
+		out := make([]string, 0, len(parts))
+		for _, part := range parts {
+			if trimmed := strings.TrimSpace(part); trimmed != "" {
+				out = append(out, trimmed)
 			}
 		}
-		if len(parts) > 0 {
-			return parts
+		if len(out) > 0 {
+			return out
 		}
 	}
 	return defaultValue
+}
+
+func getEnvCSV(key string) []string {
+	value := os.Getenv(key)
+	if value == "" {
+		return nil
+	}
+	return getEnvStringSlice(key, nil)
 }
