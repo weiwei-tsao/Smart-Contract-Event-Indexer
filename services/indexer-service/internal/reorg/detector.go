@@ -130,12 +130,13 @@ func (d *Detector) findForkPoint(ctx context.Context, currentBlock *BlockInfo) (
 		}
 		
 		// In a real implementation, we'd fetch the actual block from the chain
-		// and compare. For now, we'll return the first non-matching block
-		// This is a simplified version - in production, you'd need to fetch
-		// the actual blockchain data to verify
-		
-		// For now, return the parent block as fork point
-		// A more robust implementation would fetch blocks from the chain
+		// and compare hashes. Since this is a simplified detector, we treat the
+		// first cached hash we encounter as the fork point so we at least have
+		// a deterministic rollback target.
+		d.logger.WithFields(map[string]interface{}{
+			"block_number": blockNumber,
+			"cached_hash":  cachedHash,
+		}).Debug("Using cached block as fork point")
 		return blockNumber, nil
 	}
 	
@@ -201,4 +202,3 @@ func (d *Detector) InitializeCache(ctx context.Context, blocks []*BlockInfo) err
 	
 	return nil
 }
-
