@@ -25,6 +25,12 @@ service AdminService {
   
   // GetBackfillStatus retrieves backfill job status
   rpc GetBackfillStatus(BackfillStatusRequest) returns (BackfillJob);
+  
+  // GetSystemStatus retrieves overall system status
+  rpc GetSystemStatus(Empty) returns (SystemStatusResponse);
+  
+  // HealthCheck performs a health check
+  rpc HealthCheck(Empty) returns (HealthCheckResponse);
 }
 
 // AddContractRequest represents a request to add a contract
@@ -118,5 +124,35 @@ message BackfillJob {
   google.protobuf.Timestamp created_at = 9;
   google.protobuf.Timestamp updated_at = 10;
   optional google.protobuf.Timestamp completed_at = 11;
+}
+
+// Empty message for requests that don't need parameters
+message Empty {}
+
+// SystemStatusResponse contains system status information
+message SystemStatusResponse {
+  int64 indexer_lag = 1; // seconds behind chain
+  int32 total_contracts = 2;
+  int64 total_events = 3;
+  double cache_hit_rate = 4;
+  int64 last_indexed_block = 5;
+  bool is_healthy = 6;
+  int64 uptime = 7; // seconds
+  repeated ServiceStatus services = 8;
+}
+
+// ServiceStatus represents the status of a service
+message ServiceStatus {
+  string name = 1;
+  string status = 2;
+  int64 latency = 3; // milliseconds
+  google.protobuf.Timestamp last_check = 4;
+}
+
+// HealthCheckResponse contains health check information
+message HealthCheckResponse {
+  string status = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  repeated ServiceStatus services = 3;
 }
 

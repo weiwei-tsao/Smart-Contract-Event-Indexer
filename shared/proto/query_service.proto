@@ -27,16 +27,22 @@ message EventQuery {
   optional string event_name = 2;
   optional int64 from_block = 3;
   optional int64 to_block = 4;
-  int32 limit = 5;
-  int32 offset = 6;
+  repeated string addresses = 5; // events involving these addresses
+  optional string transaction_hash = 6;
+  int32 first = 7; // limit for cursor pagination
+  optional string after = 8; // cursor for pagination
+  optional string before = 9; // cursor for reverse pagination
+  int32 last = 10; // limit for reverse pagination
 }
 
 // AddressQuery represents a query for events by address
 message AddressQuery {
   string address = 1;
   optional string contract_address = 2;
-  int32 limit = 3;
-  int32 offset = 4;
+  int32 first = 3; // limit for cursor pagination
+  optional string after = 4; // cursor for pagination
+  optional string before = 5; // cursor for reverse pagination
+  int32 last = 6; // limit for reverse pagination
 }
 
 // TransactionQuery represents a query for events by transaction
@@ -49,10 +55,19 @@ message StatsQuery {
   string contract_address = 1;
 }
 
-// EventResponse contains a list of events
+// EventResponse contains a list of events with pagination info
 message EventResponse {
   repeated Event events = 1;
   int32 total_count = 2;
+  PageInfo page_info = 3;
+}
+
+// PageInfo contains pagination information
+message PageInfo {
+  bool has_next_page = 1;
+  bool has_previous_page = 2;
+  optional string start_cursor = 3;
+  optional string end_cursor = 4;
 }
 
 // Event represents a blockchain event
@@ -65,8 +80,16 @@ message Event {
   string transaction_hash = 6;
   int32 transaction_index = 7;
   int32 log_index = 8;
-  string args = 9; // JSON string
+  repeated EventArg args = 9; // structured event arguments
   google.protobuf.Timestamp timestamp = 10;
+  google.protobuf.Timestamp created_at = 11;
+}
+
+// EventArg represents a single event argument
+message EventArg {
+  string key = 1;
+  string value = 2;
+  string type = 3;
 }
 
 // StatsResponse contains contract statistics

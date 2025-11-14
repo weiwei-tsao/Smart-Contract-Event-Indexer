@@ -1,4 +1,4 @@
-.PHONY: help build test test-coverage lint fmt clean docker-build docker-up docker-down dev-up dev-down migrate-up migrate-down migrate-create proto-gen run-indexer run-api run-query run-admin deps install-tools
+.PHONY: help build test test-coverage lint fmt clean docker-build docker-up docker-down dev-up dev-down migrate-up migrate-down migrate-create proto-gen run-indexer run-api run-query run-admin deps install-tools check-commit-msg check-commit-history git-workflow
 
 # Default target
 .DEFAULT_GOAL := help
@@ -246,6 +246,62 @@ logs-ganache: ## Show Ganache logs
 ps: docker-ps ## Alias for docker-ps
 
 status: health-check ## Alias for health-check
+
+# Git Workflow
+check-commit-msg: ## Check commit message format
+	@echo "$(BLUE)Checking commit message format...$(NC)"
+	@if [ -z "$$(git log -1 --pretty=%B)" ]; then \
+		echo "$(YELLOW)No commit message found$(NC)"; \
+		exit 1; \
+	fi
+	@git log -1 --pretty=%B | head -1 | grep -E '^(feat|fix|docs|style|refactor|test|chore)(\(.+\))?: .+' > /dev/null || \
+		(echo "$(YELLOW)Commit message must follow conventional commits format$(NC)"; \
+		 echo "$(YELLOW)Format: type(scope): description$(NC)"; \
+		 echo "$(YELLOW)Example: feat(api-gateway): add event filtering endpoints$(NC)"; \
+		 exit 1)
+	@echo "$(GREEN)Commit message format is valid$(NC)"
+
+check-commit-history: ## Check recent commit history for atomic commits
+	@echo "$(BLUE)Checking recent commit history...$(NC)"
+	@git log --oneline -10 | while read line; do \
+		if echo "$$line" | grep -qE '^[a-f0-9]{7} (feat|fix|docs|style|refactor|test|chore)'; then \
+			echo "$(GREEN)✓$$line$(NC)"; \
+		else \
+			echo "$(YELLOW)⚠$$line$(NC)"; \
+		fi; \
+	done
+
+git-workflow: ## Show git workflow guidelines
+	@echo "$(BLUE)Git Workflow Guidelines$(NC)"
+	@echo ""
+	@echo "$(GREEN)Commit Format:$(NC)"
+	@echo "  type(scope): description"
+	@echo ""
+	@echo "$(GREEN)Types:$(NC)"
+	@echo "  feat     - New feature"
+	@echo "  fix      - Bug fix"
+	@echo "  docs     - Documentation"
+	@echo "  style    - Code style"
+	@echo "  refactor - Code refactoring"
+	@echo "  test     - Tests"
+	@echo "  chore    - Maintenance"
+	@echo ""
+	@echo "$(GREEN)Scopes:$(NC)"
+	@echo "  api-gateway, query-service, admin-service, indexer-service"
+	@echo "  shared, proto, models, utils, docker, docs"
+	@echo ""
+	@echo "$(GREEN)Examples:$(NC)"
+	@echo "  feat(api-gateway): add event filtering endpoints"
+	@echo "  fix(query-service): correct cache invalidation logic"
+	@echo "  docs(api): update GraphQL schema documentation"
+	@echo "  chore(deps): update Go modules and dependencies"
+	@echo ""
+	@echo "$(GREEN)Sub-task Commits:$(NC)"
+	@echo "  Each sub-task should be committed when complete"
+	@echo "  Use atomic commits for better code review"
+	@echo "  Reference the specific task: Resolves: Phase X Task Y"
+	@echo ""
+	@echo "$(YELLOW)For detailed guidelines, see: docs/development/GIT_WORKFLOW.md$(NC)"
 
 # Complete Setup
 setup: ## Complete project setup

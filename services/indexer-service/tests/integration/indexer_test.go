@@ -173,6 +173,7 @@ func TestIndexer_HappyPath(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	requireIntegrationEnv(t)
 	
 	config, testData, _, db := setupTestEnvironment(t)
 	defer db.Close()
@@ -217,6 +218,7 @@ func TestIndexer_BatchProcessing(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	requireIntegrationEnv(t)
 	
 	config, testData, _, db := setupTestEnvironment(t)
 	defer db.Close()
@@ -257,6 +259,7 @@ func TestIndexer_StateRecovery(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	requireIntegrationEnv(t)
 	
 	config, testData, _, db := setupTestEnvironment(t)
 	defer db.Close()

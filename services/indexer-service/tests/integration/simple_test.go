@@ -23,6 +23,7 @@ func TestIndexer_ServiceStartup(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	requireIntegrationEnv(t)
 
 	t.Log("🧪 Starting integration test: Service Startup")
 
@@ -74,6 +75,7 @@ func TestIndexer_DatabaseSchema(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	requireIntegrationEnv(t)
 
 	t.Log("🧪 Starting integration test: Database Schema")
 
@@ -119,6 +121,7 @@ func TestIndexer_DataOperations(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	requireIntegrationEnv(t)
 
 	t.Log("🧪 Starting integration test: Data Operations")
 

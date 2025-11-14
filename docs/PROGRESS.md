@@ -11,7 +11,7 @@
 |----|-----|----|---|
 | Phase 1: Infrastructure | ✅ Complete | 5/5 | 2025-10-17 |
 | Phase 2: Indexer Core | ✅ Complete | 10/10 | 2025-10-17 |
-| Phase 3: API Layer | ⏳ Not Started | 0/3 | ETA: TBD |
+| Phase 3: API Layer | ✅ Complete | 3/3 | 2025-10-18 |
 | Phase 4: Testing | ✅ Complete | 2/2 | 2025-10-17 |
 | Phase 5: Deployment | ⏳ Not Started | 0/0 | ETA: TBD |
 
@@ -71,7 +71,15 @@
 - [ ] Phase 5: Production deployment ready
 - [ ] Performance optimization complete
 
----
+## Phase 3 Completion Notes
+
+Phase 3 deliverables are now in place:
+
+- ✅ GraphQL request path uses request-scoped dataloaders backed by the SQL store to avoid N+1 contract/stat queries.
+- ✅ Resolver gaps closed (`UniqueAddresses`, `rawLog`, contract/admin mutations) with new SQL helpers and validation.
+- ✅ API Gateway now enforces API-key authentication with tiered Redis-backed throttling plus JSON error responses.
+- ✅ Outbound gRPC calls use connection pools with retry/backoff semantics to handle transient RPC failures.
+- ✅ Documentation updated (this dashboard + changelog) and `scripts/test_phase3.sh` re-run; with Docker running all health checks + builds/tests now pass.
 
 ## Recent Highlights
 
