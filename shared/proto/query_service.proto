@@ -100,5 +100,5 @@ message StatsResponse {
   int64 current_block = 4;
   int64 indexer_delay = 5;
   google.protobuf.Timestamp last_updated = 6;
+  int64 unique_addresses = 7;
 }
-

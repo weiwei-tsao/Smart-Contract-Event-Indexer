@@ -64,8 +64,8 @@ type EventResponse struct {
 
 // PageInfo represents pagination information
 type PageInfo struct {
-	HasNextPage     bool  `json:"hasNextPage"`
-	HasPreviousPage bool  `json:"hasPreviousPage"`
+	HasNextPage     bool   `json:"hasNextPage"`
+	HasPreviousPage bool   `json:"hasPreviousPage"`
 	StartCursor     *int64 `json:"startCursor,omitempty"`
 	EndCursor       *int64 `json:"endCursor,omitempty"`
 }
@@ -78,4 +78,35 @@ type StatsResponse struct {
 	CurrentBlock    int64     `json:"currentBlock"`
 	IndexerDelay    int64     `json:"indexerDelay"`
 	LastUpdated     time.Time `json:"lastUpdated"`
+	UniqueAddresses *int64    `json:"uniqueAddresses,omitempty"`
+}
+
+// TimeRangeQuery represents aggregation requests for a contract.
+type TimeRangeQuery struct {
+	ContractAddress string    `json:"contractAddress"`
+	From            time.Time `json:"from"`
+	To              time.Time `json:"to"`
+	Interval        string    `json:"interval"`
+	EventName       *string   `json:"eventName,omitempty"`
+}
+
+// TimeBucketStat represents a bucketed aggregation response.
+type TimeBucketStat struct {
+	BucketStart time.Time `json:"bucketStart"`
+	BucketEnd   time.Time `json:"bucketEnd"`
+	EventCount  int64     `json:"eventCount"`
+}
+
+// TopNQuery represents a request for top addresses.
+type TopNQuery struct {
+	ContractAddress string        `json:"contractAddress"`
+	EventName       *string       `json:"eventName,omitempty"`
+	Limit           int           `json:"limit"`
+	Window          time.Duration `json:"window"`
+}
+
+// TopAddressStat represents aggregated address activity.
+type TopAddressStat struct {
+	Address    string `json:"address"`
+	EventCount int64  `json:"eventCount"`
 }

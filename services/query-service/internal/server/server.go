@@ -17,12 +17,15 @@ import (
 	protoapi "github.com/smart-contract-event-indexer/shared/proto"
 	"github.com/smart-contract-event-indexer/shared/utils"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // QueryServiceServer implements the gRPC QueryService
 type QueryServiceServer struct {
+	protoapi.UnimplementedQueryServiceServer
+
 	db           *sql.DB
 	redisClient  *redis.Client
 	cache        *cache.CacheManager
@@ -45,7 +48,14 @@ func NewQueryServiceServer(
 	cfg *config.Config,
 ) *grpc.Server {
 	// Initialize cache manager
-	cacheManager := cache.NewCacheManager(redisClient, logger, cfg.CacheTTL)
+	cacheManager := cache.NewCacheManager(
+		redisClient,
+		logger,
+		cfg.CacheTTL,
+		cfg.NegativeCacheTTL,
+		uint64(cfg.BloomFilterSize),
+		uint64(cfg.BloomFilterHashes),
+	)
 
 	// Initialize query service
 	queryService := service.NewQueryService(db, cacheManager, logger, cfg)
@@ -71,6 +81,7 @@ func NewQueryServiceServer(
 
 	// Register the service implementation
 	protoapi.RegisterQueryServiceServer(grpcServer, server)
+	grpc_health_v1.RegisterHealthServer(grpcServer, newHealthServer(server))
 
 	return grpcServer
 }
@@ -216,7 +227,7 @@ func (s *QueryServiceServer) GetEventsByTransaction(ctx context.Context, req *pr
 
 func (s *QueryServiceServer) GetContractStats(ctx context.Context, req *protoapi.StatsQuery) (*protoapi.StatsResponse, error) {
 	stats, err := s.queryService.GetContractStats(ctx, &types.StatsQuery{
-		ContractAddress: req.ContractAddress,
+		ContractAddress: req.GetContractAddress(),
 	})
 	if err != nil {
 		return nil, err
@@ -228,41 +239,35 @@ func (s *QueryServiceServer) GetContractStats(ctx context.Context, req *protoapi
 
 func convertEventQuery(req *protoapi.EventQuery) *types.EventQuery {
 	query := &types.EventQuery{
-		Addresses: req.Addresses,
+		Addresses: req.GetAddresses(),
 	}
 
-	if req.ContractAddress != "" {
-		query.ContractAddress = stringPtr(req.ContractAddress)
+	if val := req.GetContractAddress(); val != "" {
+		query.ContractAddress = stringPtr(val)
 	}
-	if req.EventName != "" {
-		query.EventName = stringPtr(req.EventName)
+	if val := req.GetEventName(); val != "" {
+		query.EventName = stringPtr(val)
 	}
-	if req.FromBlock > 0 {
-		query.FromBlock = int64Ptr(req.FromBlock)
+	if val := req.GetFromBlock(); val > 0 {
+		query.FromBlock = int64Ptr(val)
 	}
-	if req.ToBlock > 0 {
-		query.ToBlock = int64Ptr(req.ToBlock)
+	if val := req.GetToBlock(); val > 0 {
+		query.ToBlock = int64Ptr(val)
 	}
-	if req.TransactionHash != "" {
-		query.TransactionHash = stringPtr(req.TransactionHash)
+	if val := req.GetTransactionHash(); val != "" {
+		query.TransactionHash = stringPtr(val)
 	}
-	if req.First > 0 {
-		query.First = int32Ptr(req.First)
+	if val := req.GetFirst(); val > 0 {
+		query.First = int32Ptr(val)
 	}
-	if req.After != "" {
-		query.After = stringPtr(req.After)
+	if val := req.GetAfter(); val != "" {
+		query.After = stringPtr(val)
 	}
-	if req.Before != "" {
-		query.Before = stringPtr(req.Before)
+	if val := req.GetBefore(); val != "" {
+		query.Before = stringPtr(val)
 	}
-	if req.Last > 0 {
-		query.Last = int32Ptr(req.Last)
-	}
-	if req.Limit > 0 {
-		query.Limit = req.Limit
-	}
-	if req.Offset > 0 {
-		query.Offset = req.Offset
+	if val := req.GetLast(); val > 0 {
+		query.Last = int32Ptr(val)
 	}
 
 	return query
@@ -270,28 +275,22 @@ func convertEventQuery(req *protoapi.EventQuery) *types.EventQuery {
 
 func convertAddressQuery(req *protoapi.AddressQuery) *types.AddressQuery {
 	query := &types.AddressQuery{
-		Address: req.Address,
+		Address: req.GetAddress(),
 	}
-	if req.ContractAddress != "" {
-		query.ContractAddress = stringPtr(req.ContractAddress)
+	if val := req.GetContractAddress(); val != "" {
+		query.ContractAddress = stringPtr(val)
 	}
-	if req.First > 0 {
-		query.First = int32Ptr(req.First)
+	if val := req.GetFirst(); val > 0 {
+		query.First = int32Ptr(val)
 	}
-	if req.After != "" {
-		query.After = stringPtr(req.After)
+	if val := req.GetAfter(); val != "" {
+		query.After = stringPtr(val)
 	}
-	if req.Before != "" {
-		query.Before = stringPtr(req.Before)
+	if val := req.GetBefore(); val != "" {
+		query.Before = stringPtr(val)
 	}
-	if req.Last > 0 {
-		query.Last = int32Ptr(req.Last)
-	}
-	if req.Limit > 0 {
-		query.Limit = req.Limit
-	}
-	if req.Offset > 0 {
-		query.Offset = req.Offset
+	if val := req.GetLast(); val > 0 {
+		query.Last = int32Ptr(val)
 	}
 	return query
 }
@@ -363,10 +362,12 @@ func convertPageInfo(info *types.PageInfo) *protoapi.PageInfo {
 	}
 
 	if info.StartCursor != nil {
-		page.StartCursor = fmt.Sprintf("%d", *info.StartCursor)
+		cursor := fmt.Sprintf("%d", *info.StartCursor)
+		page.StartCursor = stringPtr(cursor)
 	}
 	if info.EndCursor != nil {
-		page.EndCursor = fmt.Sprintf("%d", *info.EndCursor)
+		cursor := fmt.Sprintf("%d", *info.EndCursor)
+		page.EndCursor = stringPtr(cursor)
 	}
 
 	return page
@@ -382,7 +383,7 @@ func convertStatsResponse(stats *types.StatsResponse) *protoapi.StatsResponse {
 		lastUpdated = timestamppb.New(stats.LastUpdated)
 	}
 
-	return &protoapi.StatsResponse{
+	resp := &protoapi.StatsResponse{
 		ContractAddress: stats.ContractAddress,
 		TotalEvents:     stats.TotalEvents,
 		LatestBlock:     stats.LatestBlock,
@@ -390,6 +391,12 @@ func convertStatsResponse(stats *types.StatsResponse) *protoapi.StatsResponse {
 		IndexerDelay:    stats.IndexerDelay,
 		LastUpdated:     lastUpdated,
 	}
+
+	if stats.UniqueAddresses != nil {
+		resp.UniqueAddresses = *stats.UniqueAddresses
+	}
+
+	return resp
 }
 
 func stringPtr(v string) *string {
