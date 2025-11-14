@@ -8,7 +8,7 @@
 ## Workstream 2 – Query Optimization Layer
 - [x] Harden `internal/optimizer` with smart routing paths (simple vs complex filters) and capture EXPLAIN plans for profiling (docs/smart_contract_event_indexer_plan.md:462-475).
 - [x] Implement slow-query logging + timeout controls tied to PRD latency targets (docs/smart_contract_event_indexer_prd.md:27-41).
-- [ ] Produce benchmarking notes comparing baseline JSONB GIN queries against the planned `event_addresses` table fallback.
+- [x] Produce benchmarking notes comparing baseline JSONB GIN queries against the planned `event_addresses` table fallback.
 
 ## Workstream 3 – Cache Layer Implementation
 - [x] Finalize deterministic cache key format + versioning for events/address/stats queries (docs/smart_contract_event_indexer_plan.md:487-509).
