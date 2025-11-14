@@ -3,7 +3,7 @@
 ## Workstream 1 – Query Service Core
 - [x] Verify gRPC interceptors (logging, metrics, recovery) align with phase-3 architecture refs and keep configs centralized (docs/smart_contract_event_indexer_plan.md:442-458).
 - [x] Expose an official gRPC health endpoint backed by DB/Redis checks so API gateway + ops can probe readiness (docs/smart_contract_event_indexer_plan.md:442-458).
-- [ ] Wire server bootstrap (cmd/main.go) to surface structured startup/shutdown logs and document env/config expectations.
+- [x] Wire server bootstrap (cmd/main.go) to surface structured startup/shutdown logs and document env/config expectations.
 
 ## Workstream 2 – Query Optimization Layer
 - [x] Harden `internal/optimizer` with smart routing paths (simple vs complex filters) and capture EXPLAIN plans for profiling (docs/smart_contract_event_indexer_plan.md:462-475).
