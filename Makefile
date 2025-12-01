@@ -1,4 +1,4 @@
-.PHONY: help build test test-coverage lint fmt clean docker-build docker-up docker-down dev-up dev-down migrate-up migrate-down migrate-create proto-gen run-indexer run-api run-query run-admin deps install-tools check-commit-msg check-commit-history git-workflow
+.PHONY: help build test test-coverage lint fmt clean docker-build docker-up docker-down dev-up dev-down migrate-up migrate-down migrate-create proto-gen run-indexer run-api run-query run-admin deps install-tools check-commit-msg check-commit-history git-workflow loadtest loadtest-quick loadtest-stress
 
 # Default target
 .DEFAULT_GOAL := help
@@ -88,6 +88,19 @@ test-integration-full: ## Run full integration test suite with Docker setup
 test-integration-simple: ## Run simple integration tests (no Docker setup)
 	@echo "$(BLUE)Running simple integration tests...$(NC)"
 	@cd services/indexer-service && go test -v ./tests/integration/... -run TestIndexer_ServiceStartup -timeout 2m
+
+# Load Testing
+loadtest: ## Run load tests (requires services running)
+	@echo "$(BLUE)Running load tests (100 concurrent, 1000 requests)...$(NC)"
+	@cd tests/loadtest && go run main.go -c 100 -n 1000 -url http://localhost:8000/graphql
+
+loadtest-quick: ## Run quick load test (50 concurrent, 500 requests)
+	@echo "$(BLUE)Running quick load test...$(NC)"
+	@cd tests/loadtest && go run main.go -c 50 -n 500 -url http://localhost:8000/graphql
+
+loadtest-stress: ## Run stress test (200 concurrent, 30s duration)
+	@echo "$(BLUE)Running stress test (200 concurrent, 30s)...$(NC)"
+	@cd tests/loadtest && go run main.go -c 200 -d 30s -url http://localhost:8000/graphql
 
 # Code Quality
 lint: ## Run linter

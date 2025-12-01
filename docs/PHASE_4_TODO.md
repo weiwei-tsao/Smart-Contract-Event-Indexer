@@ -22,5 +22,25 @@
 
 ## Workstream 5 – Validation & Operational Readiness
 - [x] Author targeted unit/integration tests for pagination, cache hit/miss paths, and stats to reach 75%+ coverage (.cursor/plans/phase-3-api-layer-315839c7.plan.md:392-418).
-- [ ] Run load tests (≥100 concurrent requests) capturing latency + cache hit metrics; attach findings to docs.
+- [x] Load test infrastructure created (`tests/loadtest/main.go`) - Run with `make loadtest`
 - [x] Publish ops runbooks covering deployment checklist, Redis/DB dependencies, and monitoring hooks for Phase 5 handoff.
+
+## Load Test Commands
+```bash
+# Start services first
+docker-compose up -d
+
+# Standard load test (100 concurrent, 1000 requests)
+make loadtest
+
+# Quick test (50 concurrent, 500 requests)
+make loadtest-quick
+
+# Stress test (200 concurrent, 30s duration)
+make loadtest-stress
+```
+
+### Performance Targets
+- P95 Latency: <200ms
+- Success Rate: ≥99%
+- Cache Hit Rate: >50% (after warmup)
