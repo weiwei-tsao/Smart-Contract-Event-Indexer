@@ -3,6 +3,7 @@ package server
 import (
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/smart-contract-event-indexer/api-gateway/internal/config"
 	"github.com/smart-contract-event-indexer/api-gateway/internal/handler"
 	"github.com/smart-contract-event-indexer/api-gateway/internal/middleware"
+	"github.com/smart-contract-event-indexer/api-gateway/web"
 	protoapi "github.com/smart-contract-event-indexer/shared/proto"
 	"github.com/smart-contract-event-indexer/shared/utils"
 )
@@ -106,6 +108,15 @@ func NewHTTPServer(
 	})
 	router.GET("/playground", func(c *gin.Context) {
 		playground.Handler("GraphQL Playground", "/graphql").ServeHTTP(c.Writer, c.Request)
+	})
+
+	// Static files - Landing page
+	staticFS, _ := fs.Sub(web.StaticFiles, ".")
+	router.GET("/", func(c *gin.Context) {
+		c.FileFromFS("index.html", http.FS(staticFS))
+	})
+	router.GET("/config.js", func(c *gin.Context) {
+		c.FileFromFS("config.js", http.FS(staticFS))
 	})
 
 	// Create HTTP server

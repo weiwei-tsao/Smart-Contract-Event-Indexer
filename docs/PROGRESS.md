@@ -61,9 +61,17 @@
 | Service | Port | Status | Features |
 |---------|------|--------|----------|
 | indexer-service | 8080 | ✅ Complete | Blockchain monitoring, event parsing, reorg handling |
-| api-gateway | 8000 | ✅ Complete | GraphQL, REST, authentication, rate limiting |
+| api-gateway | 8000 | ✅ Complete | GraphQL, REST, Landing Page, Playground, rate limiting |
 | query-service | 8081 | ✅ Complete | gRPC, caching, query optimization, aggregations |
 | admin-service | 8082 | ✅ Complete | Contract management, backfill jobs, system status |
+
+### Web UI Endpoints
+| Path | Description |
+|------|-------------|
+| `/` | Landing page with project overview |
+| `/playground` | GraphQL Playground for API testing |
+| `/api/v1/*` | REST API endpoints |
+| `/graphql` | GraphQL endpoint |
 
 ---
 

@@ -149,10 +149,16 @@ That's it! Your development environment is ready. 🎉
 
 ### Access Services
 
-- **PostgreSQL**: `localhost:5432` (user: indexer, pass: indexer_password)
-- **Redis**: `localhost:6379`
-- **Ganache RPC**: `http://localhost:8545`
-- **Adminer (DB UI)**: `http://localhost:8080`
+| Service | URL | Description |
+|---------|-----|-------------|
+| **Landing Page** | `http://localhost:8000` | Project overview & API links |
+| **GraphQL Playground** | `http://localhost:8000/playground` | Interactive API testing |
+| **GraphQL API** | `http://localhost:8000/graphql` | GraphQL endpoint |
+| **REST API** | `http://localhost:8000/api/v1/*` | REST endpoints |
+| **PostgreSQL** | `localhost:5432` | Database (user: indexer) |
+| **Redis** | `localhost:6379` | Cache |
+| **Ganache RPC** | `http://localhost:8545` | Local blockchain |
+| **Adminer** | `http://localhost:8080` | Database UI |
 
 ## 💻 Development
 
@@ -233,6 +239,7 @@ mono-repo/
 ├── services/               # Microservices
 │   ├── indexer-service/   # Blockchain event indexing
 │   ├── api-gateway/       # GraphQL/REST API
+│   │   └── web/           # Embedded frontend (Landing Page)
 │   ├── query-service/     # Query optimization
 │   └── admin-service/     # Admin & management
 ├── shared/                 # Shared code
@@ -247,6 +254,8 @@ mono-repo/
 │   └── terraform/         # Terraform configs
 ├── migrations/            # Database migrations
 ├── graphql/               # GraphQL schemas
+├── tests/                 # Test suites
+│   └── loadtest/          # Load testing tools
 ├── scripts/               # Utility scripts
 ├── docs/                  # Documentation
 ├── docker-compose.yml     # Local development
@@ -318,10 +327,26 @@ make test-integration
 open coverage.html
 ```
 
+### Load Testing
+
+```bash
+# Standard load test (100 concurrent, 1000 requests)
+make loadtest
+
+# Quick test (50 concurrent, 500 requests)
+make loadtest-quick
+
+# Stress test (200 concurrent, 30s duration)
+make loadtest-stress
+```
+
+**Performance Targets**: P95 < 200ms, Success Rate ≥ 99%
+
 ### Test Structure
 
 - **Unit Tests**: Test individual functions and components
 - **Integration Tests**: Test service interactions
+- **Load Tests**: Performance and concurrency testing
 - **E2E Tests**: Test complete workflows with Docker services
 
 ## 🚢 Deployment
@@ -373,32 +398,34 @@ kubectl logs -f deployment/indexer-service -n event-indexer
 ### Project Documentation
 
 - [Progress Dashboard](docs/PROGRESS.md) - Current project status and metrics
-- [Changelog](CHANGELOG.md) - Detailed change history
+- [Quick Reference](docs/QUICK_REFERENCE.md) - Developer quick reference
 - [Architecture Overview](docs/smart_contract_event_indexer_architecture.md)
 - [Product Requirements](docs/smart_contract_event_indexer_prd.md)
 - [Implementation Plan](docs/smart_contract_event_indexer_plan.md)
-- [Development Workflow](docs/QUICK_REFERENCE.md)
-
-### Development Logs
-
-- [Feature Logs](docs/development/features/) - Detailed implementation logs
-  - [Phase 2 Indexer Service](docs/development/features/001-phase-2-indexer-service.md)
-  - [Testing Strategy](docs/development/features/002-testing-strategy.md)
-  - [Integration Testing](docs/development/features/003-integration-testing.md)
-  - [Unit Testing](docs/development/features/004-unit-testing.md)
-- [Bug Fixes](docs/development/bugs/) - Bug resolution documentation
-- [Debug Sessions](docs/development/debug-sessions/) - Complex debugging sessions
 
 ### Architecture Documentation
 
 - [System Architecture](docs/architecture/diagrams/system-architecture.md) - High-level system design
 - [Architecture Decisions](docs/architecture/decisions/) - ADRs for major decisions
-  - [Why Microservices](docs/architecture/decisions/001-why-microservices.md)
+- [Git Workflow](docs/development/GIT_WORKFLOW.md) - Development workflow guidelines
 
 ### API Documentation
 
-- GraphQL Playground: `http://localhost:8000/playground` (when API Gateway is running)
+- **Landing Page**: `http://localhost:8000` - Project overview with live status
+- **GraphQL Playground**: `http://localhost:8000/playground` - Interactive API testing
 - REST API: See [API Documentation](docs/api/rest-endpoints.md)
+
+### Frontend Deployment (Vercel)
+
+The landing page can be deployed separately to Vercel for free hosting:
+
+```bash
+cd services/api-gateway/web
+# Edit config.js to set API_URL to your backend
+vercel deploy
+```
+
+The frontend is also embedded in the Go binary for single-deployment scenarios.
 
 ## 🤝 Contributing
 
@@ -425,17 +452,17 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ## 📊 Project Status
 
-**Current Phase**: Phase 1 - Infrastructure ✅ Complete
+**Current Phase**: Phase 4 - Query Service ✅ Complete
 
-**Next Phase**: Phase 2 - Indexer Service Core (Blockchain connection, event parsing, storage)
+**Overall Progress**: 90% (18/20 tasks)
 
 ### Roadmap
 
-- [x] **Phase 1**: Infrastructure setup (Week 1) ✅
-- [x] **Phase 2**: Indexer Service core (Week 1-2) ✅
-- [ ] **Phase 3**: API layer (Week 2-3)
-- [ ] **Phase 4**: Testing & optimization (Week 4)
-- [ ] **Phase 5**: Deployment & documentation (Week 5)
+- [x] **Phase 1**: Infrastructure setup ✅
+- [x] **Phase 2**: Indexer Service core ✅
+- [x] **Phase 3**: API layer ✅
+- [x] **Phase 4**: Query Service & optimization ✅
+- [ ] **Phase 5**: Deployment & production
 
 ## 📄 License
 

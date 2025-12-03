@@ -1,4 +1,4 @@
-.PHONY: help build test test-coverage lint fmt clean docker-build docker-up docker-down dev-up dev-down migrate-up migrate-down migrate-create proto-gen run-indexer run-api run-query run-admin deps install-tools check-commit-msg check-commit-history git-workflow loadtest loadtest-quick loadtest-stress
+.PHONY: help build test test-coverage lint fmt clean docker-build docker-up docker-down dev-up dev-down migrate-up migrate-down migrate-create proto-gen run-indexer run-api run-query run-admin deps install-tools check-commit-msg check-commit-history git-workflow loadtest loadtest-quick loadtest-stress test-frontend
 
 # Default target
 .DEFAULT_GOAL := help
@@ -101,6 +101,10 @@ loadtest-quick: ## Run quick load test (50 concurrent, 500 requests)
 loadtest-stress: ## Run stress test (200 concurrent, 30s duration)
 	@echo "$(BLUE)Running stress test (200 concurrent, 30s)...$(NC)"
 	@cd tests/loadtest && go run main.go -c 200 -d 30s -url http://localhost:8000/graphql
+
+test-frontend: ## Run frontend integration tests (requires services running)
+	@echo "$(BLUE)Running frontend integration tests...$(NC)"
+	@./scripts/test_frontend.sh
 
 # Code Quality
 lint: ## Run linter
