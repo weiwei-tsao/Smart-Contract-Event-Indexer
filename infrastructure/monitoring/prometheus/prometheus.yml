@@ -1,0 +1,33 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Indexer Service metrics
+  - job_name: 'indexer-service'
+    static_configs:
+      - targets: ['indexer-service:8081']
+    metrics_path: /metrics
+
+  # Query Service metrics
+  - job_name: 'query-service'
+    static_configs:
+      - targets: ['query-service:9091']
+    metrics_path: /metrics
+
+  # Admin Service metrics
+  - job_name: 'admin-service'
+    static_configs:
+      - targets: ['admin-service:9092']
+    metrics_path: /metrics
+
+  # API Gateway metrics
+  - job_name: 'api-gateway'
+    static_configs:
+      - targets: ['api-gateway:8000']
+    metrics_path: /metrics

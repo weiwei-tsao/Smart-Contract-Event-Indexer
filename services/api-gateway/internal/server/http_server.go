@@ -10,6 +10,7 @@ import (
 	gqlhandler "github.com/99designs/gqlgen/graphql/handler"
 	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"github.com/smart-contract-event-indexer/api-gateway/graph"
 	"github.com/smart-contract-event-indexer/api-gateway/graph/generated"
@@ -109,6 +110,9 @@ func NewHTTPServer(
 	router.GET("/playground", func(c *gin.Context) {
 		playground.Handler("GraphQL Playground", "/graphql").ServeHTTP(c.Writer, c.Request)
 	})
+
+	// Prometheus metrics endpoint
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// Static files - Landing page
 	staticFS, _ := fs.Sub(web.StaticFiles, ".")

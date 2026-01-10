@@ -5,15 +5,17 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/smart-contract-event-indexer/admin-service/internal/config"
 	"github.com/smart-contract-event-indexer/admin-service/internal/server"
-	"github.com/smart-contract-event-indexer/shared/database"
 	sharedconfig "github.com/smart-contract-event-indexer/shared/config"
+	"github.com/smart-contract-event-indexer/shared/database"
 	"github.com/smart-contract-event-indexer/shared/utils"
 )
 
@@ -55,6 +57,20 @@ func main() {
 		logger.Fatal("Failed to connect to Redis", "error", err)
 	}
 	defer redisClient.Close()
+
+	// Start metrics HTTP server
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		metricsServer := &http.Server{
+			Addr:    ":9092",
+			Handler: mux,
+		}
+		logger.Info("Metrics server started", "address", ":9092")
+		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("Metrics server error", "error", err)
+		}
+	}()
 
 	// Create and start gRPC server
 	grpcServer := server.NewAdminServiceServer(db.DB, redisClient.Client, logger, cfg)

@@ -11,7 +11,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
-	
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/smart-contract-event-indexer/indexer-service/internal/blockchain"
 	"github.com/smart-contract-event-indexer/indexer-service/internal/config"
 	"github.com/smart-contract-event-indexer/indexer-service/internal/indexer"
@@ -128,10 +129,13 @@ func main() {
 	logger.Info("Indexer service stopped")
 }
 
-// startHealthCheckServer starts an HTTP server for health checks
+// startHealthCheckServer starts an HTTP server for health checks and metrics
 func startHealthCheckServer(port int, logger utils.Logger, db *sqlx.DB, client *blockchain.Client) *http.Server {
 	mux := http.NewServeMux()
-	
+
+	// Prometheus metrics endpoint
+	mux.Handle("/metrics", promhttp.Handler())
+
 	// Health check endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
