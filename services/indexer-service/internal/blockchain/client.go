@@ -74,6 +74,15 @@ func (c *Client) GetBlockByNumber(ctx context.Context, blockNumber int64) (*type
 	return block, nil
 }
 
+// GetBlockHeaderByNumber returns a block header by its number (avoids transaction decoding issues)
+func (c *Client) GetBlockHeaderByNumber(ctx context.Context, blockNumber int64) (*types.Header, error) {
+	header, err := c.client.HeaderByNumber(ctx, big.NewInt(blockNumber))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get block header %d: %w", blockNumber, err)
+	}
+	return header, nil
+}
+
 // GetBlockByHash returns a block by its hash
 func (c *Client) GetBlockByHash(ctx context.Context, hash common.Hash) (*types.Block, error) {
 	block, err := c.client.BlockByHash(ctx, hash)

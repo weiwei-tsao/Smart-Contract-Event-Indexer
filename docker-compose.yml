@@ -105,8 +105,8 @@ services:
     environment:
       - DATABASE_URL=postgres://indexer:indexer_password@postgres:5432/event_indexer?sslmode=disable
       - REDIS_URL=redis://redis:6379
-      - RPC_ENDPOINT=http://ganache:8545
-      - LOG_LEVEL=info
+      - RPC_ENDPOINT=https://ethereum-rpc.publicnode.com
+      - LOG_LEVEL=debug
       - LOG_FORMAT=json
       - HEALTH_PORT=8081
     depends_on:

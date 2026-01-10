@@ -151,8 +151,8 @@ func (s *AdminService) AddContract(ctx context.Context, req *AddContractRequest)
 		}, nil
 	}
 
-	// Validate ABI JSON
-	var abiJSON models.JSONB
+	// Validate ABI JSON (ABI is an array of event/function definitions)
+	var abiJSON interface{}
 	if err := json.Unmarshal([]byte(req.ABI), &abiJSON); err != nil {
 		return &AddContractResponse{
 			Success: false,
@@ -168,6 +168,7 @@ func (s *AdminService) AddContract(ctx context.Context, req *AddContractRequest)
 	`
 
 	var contractID int32
+	now := models.Now().Time
 	err = s.db.QueryRowContext(ctx,
 		insertQuery,
 		req.Address,
@@ -176,8 +177,8 @@ func (s *AdminService) AddContract(ctx context.Context, req *AddContractRequest)
 		req.StartBlock,
 		req.StartBlock, // current_block starts at start_block
 		req.ConfirmBlocks,
-		models.Now(),
-		models.Now(),
+		now,
+		now,
 	).Scan(&contractID)
 
 	if err != nil {

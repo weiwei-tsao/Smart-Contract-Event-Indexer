@@ -140,7 +140,9 @@ func (i *Indexer) processAllContracts(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to get latest block: %w", err)
 	}
-	
+
+	i.logger.WithField("latest_block", latestBlock).Debug("Got latest block from blockchain")
+
 	// Get all contracts
 	contracts, err := i.contractStorage.GetAllContracts(ctx)
 	if err != nil {
@@ -149,6 +151,13 @@ func (i *Indexer) processAllContracts(ctx context.Context) error {
 	
 	// Process each contract
 	for _, contract := range contracts {
+		i.logger.WithFields(map[string]interface{}{
+			"contract":      contract.Address,
+			"current_block": contract.CurrentBlock,
+			"start_block":   contract.StartBlock,
+			"latest_block":  latestBlock,
+		}).Debug("About to process contract")
+
 		if err := i.processContract(ctx, contract, latestBlock); err != nil {
 			i.logger.WithError(err).WithFields(map[string]interface{}{
 				"contract": contract.Address,
@@ -231,12 +240,12 @@ func (i *Indexer) processContract(ctx context.Context, contract *models.Contract
 		return nil
 	}
 	
-	// Get block timestamp for the last block in the range
-	block, err := i.client.GetBlockByNumber(ctx, toBlock)
+	// Get block header for timestamp (using header to avoid transaction decoding issues)
+	header, err := i.client.GetBlockHeaderByNumber(ctx, toBlock)
 	if err != nil {
-		return fmt.Errorf("failed to get block: %w", err)
+		return fmt.Errorf("failed to get block header: %w", err)
 	}
-	blockTimestamp := time.Unix(int64(block.Time()), 0).UTC()
+	blockTimestamp := time.Unix(int64(header.Time), 0).UTC()
 	
 	// Parse logs into events
 	events, err := eventParser.ParseLogs(logs, blockTimestamp)
@@ -270,7 +279,7 @@ func (i *Indexer) processContract(ctx context.Context, contract *models.Contract
 		ctx,
 		contract.Address,
 		toBlock,
-		models.Hash(block.Hash().Hex()),
+		models.Hash(header.Hash().Hex()),
 	); err != nil {
 		return fmt.Errorf("failed to update indexer state: %w", err)
 	}

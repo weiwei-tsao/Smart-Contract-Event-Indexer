@@ -208,19 +208,19 @@ proto-gen: ## Generate gRPC code from proto files
 # Running Services
 run-indexer: ## Run indexer service locally
 	@echo "$(BLUE)Running indexer service...$(NC)"
-	@cd services/indexer-service && go run ./cmd/main.go
+	@if [ -f .env ]; then set -a && . ./.env && set +a; fi && cd services/indexer-service && go run ./cmd/main.go
 
 run-api: ## Run API gateway locally
 	@echo "$(BLUE)Running API gateway...$(NC)"
-	@cd services/api-gateway && go run ./cmd/main.go
+	@if [ -f .env ]; then set -a && . ./.env && set +a; fi && cd services/api-gateway && go run ./cmd/main.go
 
 run-query: ## Run query service locally
 	@echo "$(BLUE)Running query service...$(NC)"
-	@cd services/query-service && go run ./cmd/main.go
+	@if [ -f .env ]; then set -a && . ./.env && set +a; fi && cd services/query-service && go run ./cmd/main.go
 
 run-admin: ## Run admin service locally
 	@echo "$(BLUE)Running admin service...$(NC)"
-	@cd services/admin-service && go run ./cmd/main.go
+	@if [ -f .env ]; then set -a && . ./.env && set +a; fi && cd services/admin-service && go run ./cmd/main.go
 
 # Health Checks
 health-check: ## Check health of all services

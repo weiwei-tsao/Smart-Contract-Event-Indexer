@@ -128,8 +128,8 @@ func (h *ContractHandler) AddContract(c *gin.Context) {
 		return
 	}
 
-	// Validate ABI JSON
-	var abiJSON models.JSONB
+	// Validate ABI JSON (ABI is an array of event/function definitions)
+	var abiJSON interface{}
 	if err := json.Unmarshal([]byte(req.ABI), &abiJSON); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ABI JSON"})
 		return
