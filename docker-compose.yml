@@ -82,10 +82,10 @@ services:
     container_name: event-indexer-migrate
     volumes:
       - ./migrations:/migrations
-    command: >
-      -path=/migrations
-      -database="postgres://indexer:indexer_password@postgres:5432/event_indexer?sslmode=disable"
-      up
+    entrypoint:
+      - migrate
+      - -path=/migrations
+      - -database=postgres://indexer:indexer_password@postgres:5432/event_indexer?sslmode=disable
     depends_on:
       postgres:
         condition: service_healthy
