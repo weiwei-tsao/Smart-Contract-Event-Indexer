@@ -45,19 +45,19 @@ func (h *EventHandler) GetEvents(c *gin.Context) {
 	req := &protoapi.EventQuery{}
 
 	if v := c.Query("contract"); v != "" {
-		req.ContractAddress = v
+		req.ContractAddress = &v
 	}
 	if v := c.Query("event_name"); v != "" {
-		req.EventName = v
+		req.EventName = &v
 	}
 	if v := c.Query("from_block"); v != "" {
 		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
-			req.FromBlock = parsed
+			req.FromBlock = &parsed
 		}
 	}
 	if v := c.Query("to_block"); v != "" {
 		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
-			req.ToBlock = parsed
+			req.ToBlock = &parsed
 		}
 	}
 
@@ -67,14 +67,10 @@ func (h *EventHandler) GetEvents(c *gin.Context) {
 			limit = parsed
 		}
 	}
-	offset := 0
-	if v := c.Query("offset"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
-			offset = parsed
-		}
+	if v := c.Query("after"); v != "" {
+		req.After = &v
 	}
-	req.Limit = int32(limit)
-	req.Offset = int32(offset)
+	req.First = int32(limit)
 
 	ctx := c.Request.Context()
 	resp, err := h.queryClient.GetEvents(ctx, req)
@@ -88,7 +84,6 @@ func (h *EventHandler) GetEvents(c *gin.Context) {
 		"events":      restEventsFromProto(resp.Events),
 		"total_count": resp.TotalCount,
 		"limit":       limit,
-		"offset":      offset,
 	})
 }
 

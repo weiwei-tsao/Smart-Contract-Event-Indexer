@@ -135,13 +135,16 @@ func (h *ContractHandler) AddContract(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.adminClient.AddContract(c.Request.Context(), &protoapi.AddContractRequest{
-		Address:       req.Address,
-		Abi:           req.ABI,
-		Name:          req.Name,
-		StartBlock:    req.StartBlock,
-		ConfirmBlocks: req.ConfirmBlocks,
-	})
+	protoReq := &protoapi.AddContractRequest{
+		Address:    req.Address,
+		Abi:        req.ABI,
+		Name:       req.Name,
+		StartBlock: req.StartBlock,
+	}
+	if req.ConfirmBlocks != 0 {
+		protoReq.ConfirmBlocks = &req.ConfirmBlocks
+	}
+	resp, err := h.adminClient.AddContract(c.Request.Context(), protoReq)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to add contract via admin service")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create contract"})

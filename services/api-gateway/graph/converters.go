@@ -89,11 +89,11 @@ func pageInfoFromProto(pi *protoapi.PageInfo) models.PageInfo {
 		HasNextPage:     pi.HasNextPage,
 		HasPreviousPage: pi.HasPreviousPage,
 	}
-	if pi.StartCursor != "" {
-		page.StartCursor = stringPtr(pi.StartCursor)
+	if sc := pi.GetStartCursor(); sc != "" {
+		page.StartCursor = stringPtr(sc)
 	}
-	if pi.EndCursor != "" {
-		page.EndCursor = stringPtr(pi.EndCursor)
+	if ec := pi.GetEndCursor(); ec != "" {
+		page.EndCursor = stringPtr(ec)
 	}
 	return page
 }

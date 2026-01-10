@@ -22,6 +22,7 @@ import (
 
 // AdminServiceServer implements the gRPC AdminService
 type AdminServiceServer struct {
+	protoapi.UnimplementedAdminServiceServer
 	db           *sql.DB
 	redisClient  *redis.Client
 	adminService *service.AdminService
@@ -166,7 +167,7 @@ func (s *AdminServiceServer) AddContract(ctx context.Context, req *protoapi.AddC
 		Name:          req.Name,
 		ABI:           req.Abi,
 		StartBlock:    req.StartBlock,
-		ConfirmBlocks: req.ConfirmBlocks,
+		ConfirmBlocks: req.GetConfirmBlocks(),
 	})
 	if err != nil {
 		return nil, err
@@ -316,14 +317,13 @@ func convertBackfillJob(job *service.BackfillJob) *protoapi.BackfillJob {
 		return nil
 	}
 
-	return &protoapi.BackfillJob{
+	pbJob := &protoapi.BackfillJob{
 		Id:              job.ID,
 		ContractAddress: job.ContractAddress,
 		FromBlock:       job.FromBlock,
 		ToBlock:         job.ToBlock,
 		CurrentBlock:    job.CurrentBlock,
 		Status:          job.Status,
-		ErrorMessage:    job.ErrorMessage,
 		Progress:        job.Progress,
 		CreatedAt:       timestampOrNil(job.CreatedAt),
 		UpdatedAt:       timestampOrNil(job.UpdatedAt),
@@ -334,6 +334,10 @@ func convertBackfillJob(job *service.BackfillJob) *protoapi.BackfillJob {
 			return timestamppb.New(*job.CompletedAt)
 		}(),
 	}
+	if job.ErrorMessage != "" {
+		pbJob.ErrorMessage = &job.ErrorMessage
+	}
+	return pbJob
 }
 
 func timestampOrNil(t time.Time) *timestamppb.Timestamp {

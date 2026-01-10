@@ -129,11 +129,14 @@ func (r *eventArgResolver) Value(ctx context.Context, obj *models.EventArg) (str
 // AddContract is the resolver for the addContract field.
 func (r *mutationResolver) AddContract(ctx context.Context, input models.AddContractInput) (*model.AddContractPayload, error) {
 	req := &protoapi.AddContractRequest{
-		Address:       string(input.Address),
-		Abi:           input.ABI,
-		Name:          input.Name,
-		StartBlock:    input.StartBlock,
-		ConfirmBlocks: int32(input.GetConfirmBlocks()),
+		Address:    string(input.Address),
+		Abi:        input.ABI,
+		Name:       input.Name,
+		StartBlock: input.StartBlock,
+	}
+	if cb := input.GetConfirmBlocks(); cb != 0 {
+		confirmBlocks := int32(cb)
+		req.ConfirmBlocks = &confirmBlocks
 	}
 
 	resp, err := r.AdminClient.AddContract(ctx, req)
@@ -287,10 +290,10 @@ func (r *queryResolver) EventsByAddress(ctx context.Context, address string, pag
 			req.First = int32(*pagination.First)
 		}
 		if pagination.After != nil {
-			req.After = *pagination.After
+			req.After = pagination.After
 		}
 		if pagination.Before != nil {
-			req.Before = *pagination.Before
+			req.Before = pagination.Before
 		}
 		if pagination.Last != nil {
 			req.Last = int32(*pagination.Last)
@@ -498,19 +501,21 @@ func applyEventFilter(req *protoapi.EventQuery, filter *models.EventFilter) {
 		return
 	}
 	if filter.ContractAddress != nil {
-		req.ContractAddress = string(*filter.ContractAddress)
+		addr := string(*filter.ContractAddress)
+		req.ContractAddress = &addr
 	}
 	if filter.EventName != nil {
-		req.EventName = *filter.EventName
+		req.EventName = filter.EventName
 	}
 	if filter.FromBlock != nil {
-		req.FromBlock = *filter.FromBlock
+		req.FromBlock = filter.FromBlock
 	}
 	if filter.ToBlock != nil {
-		req.ToBlock = *filter.ToBlock
+		req.ToBlock = filter.ToBlock
 	}
 	if filter.TransactionHash != nil {
-		req.TransactionHash = string(*filter.TransactionHash)
+		hash := string(*filter.TransactionHash)
+		req.TransactionHash = &hash
 	}
 	if len(filter.Addresses) > 0 {
 		req.Addresses = make([]string, len(filter.Addresses))
@@ -529,10 +534,10 @@ func applyPagination(req *protoapi.EventQuery, pagination *model.PaginationInput
 		req.First = int32(*pagination.First)
 	}
 	if pagination.After != nil {
-		req.After = *pagination.After
+		req.After = pagination.After
 	}
 	if pagination.Before != nil {
-		req.Before = *pagination.Before
+		req.Before = pagination.Before
 	}
 	if pagination.Last != nil {
 		req.Last = int32(*pagination.Last)
