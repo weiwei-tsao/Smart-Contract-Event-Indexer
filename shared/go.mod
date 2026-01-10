@@ -1,6 +1,6 @@
 module github.com/smart-contract-event-indexer/shared
 
-go 1.24.0
+go 1.24
 
 require (
 	github.com/ethereum/go-ethereum v1.13.5

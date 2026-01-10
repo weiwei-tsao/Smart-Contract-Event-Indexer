@@ -1,7 +1,7 @@
 # Multi-stage Dockerfile for Indexer Service
 
 # Stage 1: Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git make gcc musl-dev
@@ -14,12 +14,12 @@ COPY go.work go.work
 COPY shared/ shared/
 COPY services/indexer-service/ services/indexer-service/
 
-# Download dependencies
+# Download dependencies (disable go.work, use go.mod replace directive)
 WORKDIR /build/services/indexer-service
-RUN go mod download
+RUN GOWORK=off go mod download
 
 # Build the application
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -ldflags="-w -s" -o indexer-service ./cmd/main.go
+RUN GOWORK=off CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -ldflags="-w -s" -o indexer-service ./cmd/main.go
 
 # Stage 2: Runtime stage
 FROM alpine:latest

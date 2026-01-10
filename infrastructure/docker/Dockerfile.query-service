@@ -1,25 +1,23 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata
 
 # Set working directory
-WORKDIR /app
+WORKDIR /build
 
-# Copy go mod files
-COPY services/query-service/go.mod services/query-service/go.sum ./
-COPY shared/go.mod shared/go.sum ./shared/
+# Copy go workspace and all modules
+COPY go.work go.work
+COPY shared/ shared/
+COPY services/query-service/ services/query-service/
 
-# Download dependencies
-RUN go mod download
-
-# Copy source code
-COPY services/query-service/ ./
-COPY shared/ ./shared/
+# Download dependencies (disable go.work, use go.mod replace directive)
+WORKDIR /build/services/query-service
+RUN GOWORK=off go mod download
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o query-service ./cmd/main.go
+RUN GOWORK=off CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o query-service ./cmd/main.go
 
 # Final stage
 FROM alpine:latest
@@ -34,7 +32,7 @@ RUN adduser -D -s /bin/sh appuser
 WORKDIR /app
 
 # Copy binary from builder stage
-COPY --from=builder /app/query-service .
+COPY --from=builder /build/services/query-service/query-service .
 
 # Change ownership to appuser
 RUN chown -R appuser:appuser /app

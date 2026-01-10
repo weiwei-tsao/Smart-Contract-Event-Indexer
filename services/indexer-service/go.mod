@@ -1,6 +1,8 @@
 module github.com/smart-contract-event-indexer/indexer-service
 
-go 1.24.0
+go 1.24
+
+toolchain go1.24.0
 
 require (
 	github.com/ethereum/go-ethereum v1.13.5
