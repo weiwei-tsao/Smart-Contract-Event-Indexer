@@ -1,488 +1,172 @@
 # Smart Contract Event Indexer
 
-> A high-performance blockchain event indexer built with Go microservices, designed to monitor smart contract events, parse and store them in PostgreSQL, and expose GraphQL/REST APIs for fast queries.
+A blockchain event indexer that monitors smart contracts, stores events in a database, and provides fast query APIs.
 
-[![Go Version](https://img.shields.io/badge/Go-1.21+-blue.svg)](https://golang.org)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-
-## 📋 Table of Contents
-
-- [Overview](#overview)
-- [Features](#features)
-- [Architecture](#architecture)
-- [Tech Stack](#tech-stack)
-- [Quick Start](#quick-start)
-- [Development](#development)
-- [Project Structure](#project-structure)
-- [Configuration](#configuration)
-- [Testing](#testing)
-- [Deployment](#deployment)
-- [Documentation](#documentation)
-- [Contributing](#contributing)
-- [License](#license)
-
-## 🎯 Overview
-
-Smart Contract Event Indexer solves the problem of slow and expensive direct blockchain queries by:
-- **Real-time indexing** of smart contract events
-- **Fast querying** through PostgreSQL with optimized indexes
-- **Flexible APIs** via GraphQL and REST
-- **Reliable data** with chain reorganization handling
-
-### Core Value Propositions
-
-- 🚀 **Performance**: Event indexing delay < 90s (6-block confirmation)
-- ⚡ **Speed**: API response time P95 < 200ms
-- 📊 **Scalability**: Handles 1000+ events/second
-- 🔄 **Reliability**: 99.99% data accuracy with reorg handling
-- 🎯 **Flexibility**: Configurable confirmation strategies (1, 6, or 12 blocks)
-
-## ✨ Features
-
-### Core Functionality
-
-- ✅ **Multi-Contract Monitoring** - Track multiple smart contracts simultaneously
-- ✅ **Event Parsing** - Automatic ABI-based event parsing
-- ✅ **Chain Reorg Handling** - Detect and handle blockchain reorganizations
-- ✅ **Historical Backfill** - Index historical events from any block
-- ✅ **GraphQL API** - Flexible query interface with pagination
-- ✅ **REST API** - Traditional HTTP endpoints
-- ✅ **Real-time Updates** - Low-latency event indexing
-- ✅ **Caching Layer** - Redis-based caching for hot queries
-
-### Advanced Features
-
-- 🎛️ **Configurable Confirmations** - Choose between realtime (1 block), balanced (6 blocks), or safe (12 blocks)
-- 📈 **Contract Statistics** - Built-in analytics and metrics
-- 🔍 **JSONB Queries** - Flexible event argument filtering
-- 🔄 **Automatic Reconnection** - Resilient RPC connection management
-- 📊 **Prometheus Metrics** - Production-ready monitoring
-- 🐳 **Docker Ready** - Complete containerization support
-
-## 🏗️ Architecture
-
-### Microservices Overview
+## What It Does
 
 ```
-┌─────────────────────────────────────────┐
-│  Client (DApp / Dashboard / Analytics)  │
-└──────────────┬──────────────────────────┘
-               │ GraphQL/REST
-┌──────────────▼──────────────────────────┐
-│         API Gateway (Port 8000)         │
-│  - GraphQL (gqlgen) / REST (Gin)       │
-│  - Auth & Rate Limiting                 │
-└──────────────┬──────────────────────────┘
-               │ gRPC
-┌──────────────▼──────────────────────────┐
-│  Query Service (8081) | Admin (8082)   │
-│  - Caching (Redis)    | - Management   │
-│  - Aggregations       | - Monitoring   │
-└──────────────┬──────────────────────────┘
-               │
-┌──────────────▼──────────────────────────┐
-│      Indexer Service (Port 8080)        │
-│  - Blockchain Monitoring (WebSocket)    │
-│  - Event Parsing (go-ethereum)          │
-│  - Reorg Handling                       │
-└──────────────┬──────────────────────────┘
-               │
-         ┌─────┴──────┐
-         ▼            ▼
-    PostgreSQL    Blockchain Node
-    + Redis       (Geth/Infura/Ganache)
+Blockchain  →  Indexer  →  PostgreSQL  →  GraphQL/REST API  →  Your App
 ```
 
-### Service Responsibilities
+**Problem:** Querying blockchain directly is slow and expensive.
 
-| Service | Port | Responsibility |
-|---------|------|----------------|
-| **Indexer Service** | 8080 | Blockchain monitoring, event parsing, storage |
-| **API Gateway** | 8000 | Public API endpoints, authentication, rate limiting |
-| **Query Service** | 8081 | Query optimization, caching, aggregations |
-| **Admin Service** | 8082 | Contract management, monitoring, backfill jobs |
+**Solution:** This indexer continuously watches the blockchain, stores events in PostgreSQL, and lets you query them instantly via API.
 
-## 🛠️ Tech Stack
-
-### Backend
-- **Language**: Go 1.21+
-- **Database**: PostgreSQL 15 (JSONB for flexible event args)
-- **Cache**: Redis 7 (query caching, session management)
-- **RPC**: gRPC (inter-service communication)
-- **API**: GraphQL (gqlgen) + REST (Gin)
-
-### Blockchain
-- **Client**: go-ethereum (geth)
-- **Testnet**: Ganache (local development)
-- **Production**: Alchemy/Infura (Ethereum mainnet)
-
-### Infrastructure
-- **Containers**: Docker + Docker Compose
-- **Orchestration**: Kubernetes (K8s)
-- **CI/CD**: GitHub Actions / GitLab CI
-- **Monitoring**: Prometheus + Grafana
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- **Docker & Docker Compose** - [Install Docker](https://docs.docker.com/get-docker/)
-- **Go 1.21+** - [Install Go](https://golang.org/doc/install)
-- **Make** - Usually pre-installed on Unix systems
-
-### Installation
+## Quick Start
 
 ```bash
-# Clone the repository
+# 1. Clone and start
 git clone https://github.com/yourusername/smart-contract-event-indexer.git
 cd smart-contract-event-indexer
+docker-compose up -d
 
-# Complete setup (installs deps, starts Docker, runs migrations)
-make setup
+# 2. Run migrations
+docker-compose exec migrate /migrate -path /migrations -database "$DATABASE_URL" up
 
-# Verify all services are running
-make health-check
+# 3. Check it's working
+curl http://localhost:8000/api/v1/health
 ```
 
-That's it! Your development environment is ready. 🎉
+**That's it!** Open http://localhost:8000 to see the dashboard.
 
-### Access Services
+## Tech Stack & Why
 
-| Service | URL | Description |
-|---------|-----|-------------|
-| **Landing Page** | `http://localhost:8000` | Project overview & API links |
-| **GraphQL Playground** | `http://localhost:8000/playground` | Interactive API testing |
-| **GraphQL API** | `http://localhost:8000/graphql` | GraphQL endpoint |
-| **REST API** | `http://localhost:8000/api/v1/*` | REST endpoints |
-| **PostgreSQL** | `localhost:5432` | Database (user: indexer) |
-| **Redis** | `localhost:6379` | Cache |
-| **Ganache RPC** | `http://localhost:8545` | Local blockchain |
-| **Adminer** | `http://localhost:8080` | Database UI |
+| Component | Choice | Why |
+|-----------|--------|-----|
+| **Language** | Go | Fast, concurrent, excellent blockchain libraries |
+| **Database** | PostgreSQL | JSONB for flexible event data, GIN indexes for fast queries |
+| **Cache** | Redis | Sub-millisecond response for hot queries |
+| **API** | GraphQL + REST | GraphQL for flexible queries, REST for simplicity |
+| **Blockchain** | go-ethereum | Official Ethereum library, battle-tested |
 
-## 💻 Development
+## Architecture
 
-### Common Commands
+```
+┌─────────────────────────────────────────────────────────┐
+│                    API Gateway (:8000)                  │
+│              GraphQL / REST / Rate Limiting             │
+└─────────────────────────┬───────────────────────────────┘
+                          │ gRPC
+          ┌───────────────┼───────────────┐
+          ▼               ▼               ▼
+   ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+   │   Query     │ │   Admin     │ │   Indexer   │
+   │  Service    │ │  Service    │ │  Service    │
+   │   (:8081)   │ │   (:8082)   │ │   (:8080)   │
+   └──────┬──────┘ └──────┬──────┘ └──────┬──────┘
+          │               │               │
+          └───────────────┼───────────────┘
+                          ▼
+              ┌──────────────────────┐
+              │  PostgreSQL + Redis  │
+              └──────────────────────┘
+```
+
+**4 services, each with a single job:**
+
+| Service | Port | Job |
+|---------|------|-----|
+| Indexer | 8080 | Watch blockchain, parse events, store in DB |
+| Query | 8081 | Optimize queries, cache results |
+| Admin | 8082 | Manage contracts, run backfills |
+| Gateway | 8000 | Public API, auth, rate limiting |
+
+## API Examples
+
+**Get events for a contract:**
+```bash
+curl "http://localhost:8000/api/v1/events?contract=0x123...&limit=10"
+```
+
+**GraphQL query:**
+```graphql
+query {
+  events(filter: { contractAddress: "0x123...", eventName: "Transfer" }) {
+    edges {
+      node {
+        blockNumber
+        transactionHash
+        args
+      }
+    }
+  }
+}
+```
+
+## Configuration
+
+Key settings in `.env`:
 
 ```bash
-# Start development environment
-make dev-up
+# Blockchain connection
+RPC_ENDPOINT=http://localhost:8545        # Local: Ganache
+# RPC_ENDPOINT=https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY  # Production
 
-# Build all services
-make build
-
-# Run tests
-make test
-
-# Run linter
-make lint
-
-# Format code
-make fmt
-
-# View logs
-make docker-logs
-
-# Stop environment
-make dev-down
-
-# Database shell
-make db-shell
-
-# Redis CLI
-make redis-cli
+# How many blocks to wait before confirming events
+INDEXER_DEFAULT_CONFIRM_BLOCKS=6          # 6 blocks = ~72s delay, 99.99% accurate
 ```
 
-### Running Individual Services
+**Confirmation strategies:**
+
+| Mode | Blocks | Delay | Use Case |
+|------|--------|-------|----------|
+| Realtime | 1 | ~12s | Testing, demos |
+| Balanced | 6 | ~72s | Most apps (default) |
+| Safe | 12 | ~144s | Financial apps |
+
+## Common Commands
 
 ```bash
-# Run indexer service locally
-make run-indexer
-
-# Run API gateway
-make run-api
-
-# Run query service
-make run-query
-
-# Run admin service
-make run-admin
+make dev-up          # Start everything
+make dev-down        # Stop everything
+make test            # Run tests
+make logs            # View logs
 ```
 
-### Database Migrations
-
-```bash
-# Run migrations
-make migrate-up
-
-# Rollback migrations
-make migrate-down
-
-# Create new migration
-make migrate-create NAME=add_new_feature
-
-# Force migration version
-make migrate-force VERSION=1
-```
-
-### Generating Code
-
-```bash
-# Generate gRPC code from proto files
-make proto-gen
-```
-
-## 📁 Project Structure
+## Project Structure
 
 ```
-mono-repo/
-├── services/               # Microservices
-│   ├── indexer-service/   # Blockchain event indexing
-│   ├── api-gateway/       # GraphQL/REST API
-│   │   └── web/           # Embedded frontend (Landing Page)
-│   ├── query-service/     # Query optimization
-│   └── admin-service/     # Admin & management
-├── shared/                 # Shared code
-│   ├── models/            # Data models
-│   ├── proto/             # gRPC definitions
-│   ├── config/            # Configuration
-│   ├── utils/             # Utilities
-│   └── database/          # Database helpers
-├── infrastructure/         # Infrastructure as code
-│   ├── docker/            # Dockerfiles
-│   ├── k8s/               # Kubernetes manifests
-│   └── terraform/         # Terraform configs
-├── migrations/            # Database migrations
-├── graphql/               # GraphQL schemas
-├── tests/                 # Test suites
-│   └── loadtest/          # Load testing tools
-├── scripts/               # Utility scripts
-├── docs/                  # Documentation
-├── docker-compose.yml     # Local development
-├── Makefile              # Build automation
-└── go.work               # Go workspace
+├── services/
+│   ├── indexer-service/    # Blockchain monitoring
+│   ├── api-gateway/        # Public API
+│   ├── query-service/      # Query optimization
+│   └── admin-service/      # Management
+├── shared/                 # Shared code (models, config, utils)
+├── migrations/             # Database schemas
+└── docker-compose.yml      # Local dev environment
 ```
 
-## ⚙️ Configuration
+## Endpoints
 
-### Environment Variables
+| URL | Description |
+|-----|-------------|
+| http://localhost:8000 | Dashboard |
+| http://localhost:8000/playground | GraphQL Playground |
+| http://localhost:8000/api/v1/health | Health check |
+| http://localhost:8000/api/v1/events | Query events |
+| http://localhost:8000/api/v1/contracts | Manage contracts |
 
-Create a `.env` file based on `.env.example`:
+## Deployment Cost
 
-```bash
-# Database
-DATABASE_URL=postgres://indexer:indexer_password@localhost:5432/event_indexer?sslmode=disable
+Designed to run on free tiers:
 
-# Redis
-REDIS_URL=redis://localhost:6379
+| Service | Provider | Cost |
+|---------|----------|------|
+| App Hosting | Railway | $0-5/mo |
+| Database | Supabase | Free (500MB) |
+| Cache | Upstash Redis | Free (10K/day) |
+| Blockchain RPC | Alchemy | Free (300M CU/mo) |
 
-# Blockchain RPC
-RPC_ENDPOINT=http://localhost:8545
-# RPC_ENDPOINT=https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
+**Total: $0-5/month**
 
-# Indexer Settings
-INDEXER_BATCH_SIZE=100
-INDEXER_DEFAULT_CONFIRM_BLOCKS=6  # balanced mode
-INDEXER_POLL_INTERVAL=6s
+## Documentation
 
-# Confirmation Strategies
-# - realtime: 1 block (~12s delay)
-# - balanced: 6 blocks (~72s delay) - RECOMMENDED
-# - safe: 12 blocks (~144s delay)
+See [docs/README.md](docs/README.md) for detailed documentation including:
+- Database schema
+- API reference
+- Deployment options
+- Design decisions
 
-# Logging
-LOG_LEVEL=info
-LOG_FORMAT=json  # or "text" for development
+## License
 
-# Environment
-ENVIRONMENT=development
-```
-
-### Configuration Strategies
-
-**Confirmation Blocks** determine how many blocks to wait before considering an event "final":
-
-| Strategy | Blocks | Delay | Accuracy | Use Case |
-|----------|--------|-------|----------|----------|
-| Realtime | 1 | ~12s | ~99% | Demos, non-critical apps |
-| Balanced | 6 | ~72s | ~99.99% | Most production apps (RECOMMENDED) |
-| Safe | 12 | ~144s | ~99.9999% | Financial apps, auditing |
-
-## 🧪 Testing
-
-```bash
-# Run all tests
-make test
-
-# Run with coverage
-make test-coverage
-
-# Run unit tests only
-make test-unit
-
-# Run integration tests
-make test-integration
-
-# View coverage report
-open coverage.html
-```
-
-### Load Testing
-
-```bash
-# Standard load test (100 concurrent, 1000 requests)
-make loadtest
-
-# Quick test (50 concurrent, 500 requests)
-make loadtest-quick
-
-# Stress test (200 concurrent, 30s duration)
-make loadtest-stress
-```
-
-**Performance Targets**: P95 < 200ms, Success Rate ≥ 99%
-
-### Test Structure
-
-- **Unit Tests**: Test individual functions and components
-- **Integration Tests**: Test service interactions
-- **Load Tests**: Performance and concurrency testing
-- **E2E Tests**: Test complete workflows with Docker services
-
-## 🚢 Deployment
-
-### Docker
-
-```bash
-# Build Docker images
-make docker-build
-
-# Start all services
-make docker-up
-
-# View container status
-make docker-ps
-
-# View logs
-make docker-logs
-
-# Stop all services
-make docker-down
-```
-
-### Kubernetes
-
-```bash
-# Apply configurations
-kubectl apply -f infrastructure/k8s/
-
-# Check status
-kubectl get pods -n event-indexer
-
-# View logs
-kubectl logs -f deployment/indexer-service -n event-indexer
-```
-
-### Production Considerations
-
-1. **RPC Provider**: Use reliable providers (Alchemy, Infura)
-2. **Database**: Scale PostgreSQL with read replicas
-3. **Redis**: Use Redis Cluster for high availability
-4. **Monitoring**: Set up Prometheus + Grafana
-5. **Logging**: Centralize with ELK or Loki
-6. **Backups**: Regular database backups
-7. **Security**: Enable SSL, use secrets management
-
-## 📚 Documentation
-
-### Project Documentation
-
-- [Progress Dashboard](docs/PROGRESS.md) - Current project status and metrics
-- [Quick Reference](docs/QUICK_REFERENCE.md) - Developer quick reference
-- [Architecture Overview](docs/smart_contract_event_indexer_architecture.md)
-- [Product Requirements](docs/smart_contract_event_indexer_prd.md)
-- [Implementation Plan](docs/smart_contract_event_indexer_plan.md)
-
-### Architecture Documentation
-
-- [System Architecture](docs/architecture/diagrams/system-architecture.md) - High-level system design
-- [Architecture Decisions](docs/architecture/decisions/) - ADRs for major decisions
-- [Git Workflow](docs/development/GIT_WORKFLOW.md) - Development workflow guidelines
-
-### API Documentation
-
-- **Landing Page**: `http://localhost:8000` - Project overview with live status
-- **GraphQL Playground**: `http://localhost:8000/playground` - Interactive API testing
-- REST API: See [API Documentation](docs/api/rest-endpoints.md)
-
-### Frontend Deployment (Vercel)
-
-The landing page can be deployed separately to Vercel for free hosting:
-
-```bash
-cd services/api-gateway/web
-# Edit config.js to set API_URL to your backend
-vercel deploy
-```
-
-The frontend is also embedded in the Go binary for single-deployment scenarios.
-
-## 🤝 Contributing
-
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-### Development Workflow
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-### Commit Convention
-
-We use [Conventional Commits](https://www.conventionalcommits.org/):
-
-- `feat:` - New feature
-- `fix:` - Bug fix
-- `docs:` - Documentation changes
-- `refactor:` - Code refactoring
-- `test:` - Test additions or changes
-- `chore:` - Build process or auxiliary tool changes
-
-## 📊 Project Status
-
-**Current Phase**: Phase 4 - Query Service ✅ Complete
-
-**Overall Progress**: 90% (18/20 tasks)
-
-### Roadmap
-
-- [x] **Phase 1**: Infrastructure setup ✅
-- [x] **Phase 2**: Indexer Service core ✅
-- [x] **Phase 3**: API layer ✅
-- [x] **Phase 4**: Query Service & optimization ✅
-- [ ] **Phase 5**: Deployment & production
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- [go-ethereum](https://github.com/ethereum/go-ethereum) - Ethereum client library
-- [gqlgen](https://github.com/99designs/gqlgen) - GraphQL code generation
-- [Gin](https://github.com/gin-gonic/gin) - HTTP web framework
-- [PostgreSQL](https://www.postgresql.org/) - Database system
-- [Redis](https://redis.io/) - In-memory data store
-
-## 📧 Contact
-
-For questions or support, please open an issue on GitHub.
-
----
-
-**Built with ❤️ by the Smart Contract Event Indexer Team**
-
-*Happy Indexing! 🚀*
-
+MIT
